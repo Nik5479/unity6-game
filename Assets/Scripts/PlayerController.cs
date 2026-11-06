@@ -1,65 +1,77 @@
 using UnityEngine;
 
 /// <summary>
-/// Starter player controller for unity6-game.
-/// WASD / arrow keys on keyboard, touch-drag on phone.
-/// Full-screen landscape, Android target. No external assets needed.
+/// Player controller for THE FORGOTTEN VILLAGE (Phase 1).
+/// Hero: Nilesh. Keyboard WASD / arrows, on-screen virtual joystick
+/// (MobileControls) and RUN / JUMP buttons on phone.
+/// Movement is camera-relative. Simple AABB collision against the
+/// village (walls, well, trees, closed door) via VillageColliders.
+/// Temporary placeholder figure: the player cube's renderer is hidden
+/// and a simple dark-clothed capsule figure is built as children
+/// by VillageBuilder (no realistic human model yet).
 /// </summary>
 public class PlayerController : MonoBehaviour
 {
     public float moveSpeed = 5f;
+    public float runMultiplier = 1.8f;
     public float jumpForce = 5f;
+
+    // Set every frame by MobileControls (virtual joystick). Overrides keyboard.
+    public Vector2 moveInput;
+    // Set by the RUN button (hold).
+    public bool runHeld;
+
+    // Set by VillageBuilder.
+    public Camera playerCamera;
 
     private float yVelocity;
     private bool isGrounded = true;
-    private Vector2 touchStart;
-    private bool touchActive;
+    private const float kRadius = 0.45f;
 
     void Update()
     {
         float h = Input.GetAxis("Horizontal");
         float v = Input.GetAxis("Vertical");
-
-        // Touch: drag anywhere on screen to move.
-        if (Input.touchCount > 0)
+        if (moveInput.sqrMagnitude > 0.01f)
         {
-            Touch t = Input.GetTouch(0);
-            if (t.phase == TouchPhase.Began)
-            {
-                touchStart = t.position;
-                touchActive = true;
-            }
-            else if (t.phase == TouchPhase.Moved && touchActive)
-            {
-                Vector2 delta = (t.position - touchStart) / 100f;
-                h = Mathf.Clamp(delta.x, -1f, 1f);
-                v = Mathf.Clamp(delta.y, -1f, 1f);
-            }
-            else if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
-            {
-                touchActive = false;
-            }
+            h = moveInput.x;
+            v = moveInput.y;
         }
 
-        // Move in world space, camera is behind the player so this feels natural.
-        Vector3 move = new Vector3(h, 0f, v);
+        // Camera-relative movement (camera yaw only).
+        float yaw = 0f;
+        if (playerCamera != null)
+        {
+            yaw = playerCamera.transform.eulerAngles.y * Mathf.Deg2Rad;
+        }
+        Vector3 fwd = new Vector3(Mathf.Sin(yaw), 0f, Mathf.Cos(yaw));
+        Vector3 right = new Vector3(fwd.z, 0f, -fwd.x);
+        Vector3 move = right * h + fwd * v;
+
         if (move.sqrMagnitude > 0.01f)
         {
-            transform.Translate(move.normalized * moveSpeed * Time.deltaTime, Space.World);
-            transform.position = new Vector3(
-                Mathf.Clamp(transform.position.x, -24f, 24f),
-                transform.position.y,
-                Mathf.Clamp(transform.position.z, -24f, 24f));
+            float speed = moveSpeed * (runHeld ? runMultiplier : 1f);
+            Vector3 step = move.normalized * speed * Time.deltaTime;
+            Vector3 p = transform.position;
+            TryMove(ref p, step);
+            p.x = Mathf.Clamp(p.x, -22f, 22f);
+            p.z = Mathf.Clamp(p.z, -22f, 22f);
+            transform.position = p;
+
+            // Face the movement direction (visual figure rotates with the body).
+            float targetYaw = Mathf.Atan2(move.x, move.z) * Mathf.Rad2Deg;
+            float curYaw = transform.eulerAngles.y;
+            float newYaw = Mathf.MoveTowardsAngle(curYaw, targetYaw, 720f * Time.deltaTime);
+            transform.rotation = Quaternion.Euler(0f, newYaw, 0f);
         }
 
-        // Jump: Space / Jump button.
+        // Jump: Space / JUMP button.
         if ((Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.Space)) && isGrounded)
         {
-            yVelocity = jumpForce;
-            isGrounded = false;
+            Jump();
         }
 
-        // Simple gravity, ground is at y = 0.5 (player cube centre).
+        // Simple gravity, ground is at y = 0.5 (player centre).
         if (!isGrounded)
         {
             yVelocity -= 20f * Time.deltaTime;
@@ -72,6 +84,43 @@ public class PlayerController : MonoBehaviour
                 isGrounded = true;
             }
             transform.position = p;
+        }
+    }
+
+    public void Jump()
+    {
+        if (!isGrounded) return;
+        yVelocity = jumpForce;
+        isGrounded = false;
+    }
+
+    public void Interact()
+    {
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.TryInteract();
+        }
+    }
+
+    // Move with simple AABB collision: try full step, then X-only, then Z-only.
+    private void TryMove(ref Vector3 p, Vector3 step)
+    {
+        Vector3 full = new Vector3(p.x + step.x, p.y, p.z + step.z);
+        if (VillageColliders.CanMoveTo(full, kRadius))
+        {
+            p = full;
+            return;
+        }
+        Vector3 onlyX = new Vector3(p.x + step.x, p.y, p.z);
+        if (VillageColliders.CanMoveTo(onlyX, kRadius))
+        {
+            p = onlyX;
+            return;
+        }
+        Vector3 onlyZ = new Vector3(p.x, p.y, p.z + step.z);
+        if (VillageColliders.CanMoveTo(onlyZ, kRadius))
+        {
+            p = onlyZ;
         }
     }
 }

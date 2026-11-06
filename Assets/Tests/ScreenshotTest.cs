@@ -19,6 +19,14 @@ public class ScreenshotTest
     [UnityTest]
     public IEnumerator MainSceneLoadsAndScreenshot()
     {
+        // testMode: all runs this test in EditMode too, where
+        // SceneManager.LoadSceneAsync is not allowed (InvalidOperationException).
+        // Skip the body in EditMode; run it fully in PlayMode.
+        if (!Application.isPlaying)
+        {
+            yield break;
+        }
+
         yield return SceneManager.LoadSceneAsync("Main");
         yield return new WaitForSeconds(1f);
 
@@ -26,6 +34,14 @@ public class ScreenshotTest
         Assert.IsNotNull(player, "Player not found in Main scene");
         var cam = Camera.main;
         Assert.IsNotNull(cam, "Main Camera not found in Main scene");
+
+        // Phase 1 village: GameManager builds the village at runtime.
+        var gm = GameObject.Find("GameManager");
+        Assert.IsNotNull(gm, "GameManager not found in Main scene");
+        var door = GameObject.Find("Door_Player");
+        Assert.IsNotNull(door, "Player house door not found in Main scene");
+        var village = GameObject.Find("Village");
+        Assert.IsNotNull(village, "Village root not found in Main scene");
 
         try
         {
@@ -38,6 +54,7 @@ public class ScreenshotTest
         {
             Debug.LogWarning("Screenshot capture failed (non-fatal): " + e.Message);
         }
+        yield return new WaitForEndOfFrame();
         yield return new WaitForSeconds(0.5f);
     }
 }

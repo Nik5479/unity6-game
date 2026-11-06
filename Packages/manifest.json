@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "com.ramenvr.autopilot": "file:Packages/com.ramenvr.autopilot-1.0.1.tgz",
+    "com.ramenvr.autopilot": "file:com.ramenvr.autopilot-1.0.1.tgz",
     "com.unity.collab-proxy": "2.9.0",
     "com.unity.ide.rider": "3.0.34",
     "com.unity.ide.visualstudio": "2.0.24",

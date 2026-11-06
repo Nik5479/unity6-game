@@ -21,6 +21,7 @@ PlayerSettings:
   defaultScreenHeightWeb: 600
   runInBackground: 1
   defaultOrientation: 3
+  activeInputHandler: 2
   usePlayerLog: 1
   applicationIdentifier:
     Android: com.nik.unity6game
