@@ -39,6 +39,7 @@
     "com.unity.test-framework": "1.4.5",
     "com.unity.textmeshpro": "3.0.7",
     "com.unity.timeline": "1.8.7",
-    "com.unity.ugui": "2.0.0"
+    "com.unity.ugui": "2.0.0",
+    "gg.regression.unity.bots": "https://github.com/Regression-Games/RGUnityBots.git?path=src/gg.regression.unity.bots#v0.0.30"
   }
 }
