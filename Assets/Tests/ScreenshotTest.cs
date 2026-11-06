@@ -89,7 +89,7 @@ public class ScreenshotTest
         // Screenshot 2: second angle — wide view of the chowk from the east.
         Vector3 savedPos = cam.transform.position;
         Quaternion savedRot = cam.transform.rotation;
-        CameraFollow follow = cam.GetComponent<CameraFollow>();
+        Behaviour follow = cam.GetComponent("CameraFollow") as Behaviour;
         if (follow != null) follow.enabled = false;
         cam.transform.position = new Vector3(14f, 7f, -12f);
         cam.transform.LookAt(new Vector3(0f, 1f, 4f));
