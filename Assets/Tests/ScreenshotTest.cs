@@ -10,6 +10,9 @@ using UnityEngine.TestTools;
 /// Screenshot is written to TestScreenshots/main-scene.png (project root) so
 /// the CI workflow can upload it as an artifact. Best-effort: if capture
 /// fails on a headless runner the scene-load assertions still decide pass/fail.
+/// NOTE: yield statements must NOT sit inside a try block with a catch clause
+/// (C# error CS1626), so the capture is wrapped in try/catch and the yields
+/// stay outside it.
 /// </summary>
 public class ScreenshotTest
 {
@@ -30,11 +33,11 @@ public class ScreenshotTest
             Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, "main-scene.png");
             ScreenCapture.CaptureScreenshot(path);
-            yield return new WaitForSeconds(0.5f);
         }
         catch (System.Exception e)
         {
             Debug.LogWarning("Screenshot capture failed (non-fatal): " + e.Message);
         }
+        yield return new WaitForSeconds(0.5f);
     }
 }
