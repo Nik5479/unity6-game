@@ -27,7 +27,7 @@ jobs:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
-          tool-cache: true
+          preinstalled-runtimes: true
           android: true
           dotnet: true
           haskell: true
@@ -42,9 +42,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: Library
-          key: Library-android-6000.3.28f1-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          key: Library-android-6000.3.28f1-v2-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
           restore-keys: |
-            Library-android-6000.3.28f1-
+            Library-android-6000.3.28f1-v2-
             Library-
 
       - name: Run PlayMode tests
@@ -93,7 +93,7 @@ jobs:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
-          tool-cache: true
+          preinstalled-runtimes: true
           android: true
           dotnet: true
           haskell: true
@@ -108,9 +108,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: Library
-          key: Library-android-6000.3.28f1-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          key: Library-android-6000.3.28f1-v2-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
           restore-keys: |
-            Library-android-6000.3.28f1-
+            Library-android-6000.3.28f1-v2-
             Library-
 
       - name: Build Android APK
@@ -123,7 +123,7 @@ jobs:
           unityVersion: 6000.3.28f1
           targetPlatform: Android
           buildName: unity6-game
-          androidAppBundle: false
+          buildMethod: BuildScript.BuildAndroid
           androidKeystoreName: ""
           versioning: None
 
