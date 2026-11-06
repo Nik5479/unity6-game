@@ -1,0 +1,49 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 21
+  productGUID: 1a2b3c4d5e6f4a7b8c9d0e1f2a3b4c5d6
+  AndroidBundleVersionCode: 1
+  AndroidMinSdkVersion: 24
+  AndroidTargetSdkVersion: 0
+  AndroidTargetArchitectures: 2
+  AndroidSplashScreenScale: 0
+  companyName: Nik
+  productName: unity6-game
+  defaultCompanyName: Nik
+  defaultProductName: unity6-game
+  bundleVersion: 1.0.0
+  defaultScreenWidth: 1280
+  defaultScreenHeight: 720
+  defaultScreenWidthWeb: 960
+  defaultScreenHeightWeb: 600
+  runInBackground: 1
+  defaultOrientation: 3
+  usePlayerLog: 1
+  applicationIdentifier:
+    Android: com.nik.unity6game
+    iOS: com.nik.unity6game
+    Standalone: com.nik.unity6game
+  buildNumber:
+    Android: 1
+  AndroidUseCustomKeystore: 0
+  apiCompatibilityLevelPerPlatform:
+    Android: 2
+  scriptingBackend:
+    Android: 1
+  targetDevice: 2
+  targetGlesGraphics: 2
+  targetOSVersionString: 10.0.0
+  allowFullscreen: 1
+  visibleInBackground: 1
+  displayResolutionDialog: 0
+  captureSingleScreen: 0
+  use32BitDisplayBuffer: 1
+  use24BitDepthBuffer: 0
+  actionOnDotNetUnhandledException: 1
+  logObjCUncaughtExceptions: 1
+  enableCrashReportAPI: 0
+  enableInternalProfiler: 0
+  useHDRDisplay: 0
