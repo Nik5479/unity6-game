@@ -54,6 +54,18 @@ public class CameraFollow : MonoBehaviour
         shakeAmount = Mathf.Max(shakeAmount, amount);
     }
 
+    /// <summary>
+    /// Reset to the known-good starter camera view and stop following.
+    /// Used by VillageBuilder when the camera-frustum check fails, so the
+    /// player always gets a view of the village instead of an empty frame.
+    /// </summary>
+    public void ResetToStarterView()
+    {
+        transform.position = new Vector3(0f, 3f, -8f);
+        transform.rotation = Quaternion.Euler(20f, 0f, 0f);
+        enabled = false;
+    }
+
     private bool IsTouchOnUI(int fingerId)
     {
         if (EventSystem.current == null) return false;

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 
 /// <summary>
 /// Static AABB collision registry. VillageBuilder registers wall
@@ -56,8 +57,11 @@ public static class VillageColliders
 ///  - working door (hinge), monster figure, food pickup near the well
 ///  - player placeholder figure (dark-clothed capsule figure — TEMPORARY,
 ///    no realistic human model is available yet)
-/// Materials are created at runtime from Resources textures so no
-/// hand-written .mat GUID references are needed.
+/// Materials are real .mat assets (Assets/Resources/Materials/) loaded by
+/// name, so the Standard shader is referenced by assets and included in
+/// the build — runtime Shader.Find is only a fallback. Each build step is
+/// wrapped in try/catch so one failure cannot kill the whole village, and
+/// an on-screen boot status line reports what was built.
 /// </summary>
 public class VillageBuilder : MonoBehaviour
 {
@@ -88,26 +92,167 @@ public class VillageBuilder : MonoBehaviour
 
     private Transform villageRoot;
     private Camera mainCam;
+    private Shader standardShader;
+    private Text bootStatusText;
+    private int buildErrors;
 
     void Awake()
     {
+        // Landscape lock (runtime belt-and-braces for ProjectSettings):
+        // the game must open in landscape even if the phone is held portrait.
+        // NOTE: the old ProjectSettings.asset used the wrong field name
+        // (defaultOrientation) which Unity ignores — fixed to
+        // defaultScreenOrientation + allowedAutorotate flags.
+        try
+        {
+            Screen.autorotateToPortrait = false;
+            Screen.autorotateToPortraitUpsideDown = false;
+            Screen.autorotateToLandscapeLeft = true;
+            Screen.autorotateToLandscapeRight = true;
+            Screen.orientation = ScreenOrientation.LandscapeRight;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Orientation lock failed: " + e.Message);
+        }
+
         VillageColliders.Clear();
         mainCam = Camera.main;
         villageRoot = new GameObject("Village").transform;
+        CreateBootStatus();
 
-        BuildMaterials();
-        BuildGround();
-        BuildPlayerFigure();
-        BuildHouses();
-        BuildWellAndLamp();
-        BuildField();
-        BuildJungleAndFences();
-        BuildProps();
-        BuildMoon();
+        // Each step is isolated: one failing step must not kill the village.
+        RunStep("Materials", BuildMaterials);
+        RunStep("Ground", BuildGround);
+        RunStep("PlayerFigure", BuildPlayerFigure);
+        RunStep("Houses", BuildHouses);
+        RunStep("WellAndLamp", BuildWellAndLamp);
+        RunStep("Field", BuildField);
+        RunStep("JungleAndFences", BuildJungleAndFences);
+        RunStep("Props", BuildProps);
+        RunStep("Moon", BuildMoon);
+        RunStep("SetupSystems", SetupSystems);
+        RunStep("SceneAmbience", SetupSceneAmbience);
 
-        SetupSystems();
-        SetupSceneAmbience();
+        SetBootStatus("Village: " + CountVillageObjects() + " objects built"
+            + (buildErrors > 0 ? " (" + buildErrors + " step errors — see log)" : ""));
         StartCoroutine(IntroSequence());
+        StartCoroutine(VerifyCameraView());
+    }
+
+    // Runs one build step; a failure is logged and the build continues.
+    private void RunStep(string name, System.Action step)
+    {
+        try
+        {
+            step();
+            SetBootStatus("Village: building... " + name + " OK");
+        }
+        catch (System.Exception e)
+        {
+            buildErrors++;
+            Debug.LogError("[Village] Build step FAILED: " + name + " — "
+                + e.GetType().Name + ": " + e.Message + "\n" + e.StackTrace);
+            SetBootStatus("Village: ERROR in " + name + " — continuing");
+        }
+    }
+
+    // On-screen boot status so a blank screen can never again be silent.
+    private void CreateBootStatus()
+    {
+        try
+        {
+            GameObject canvasGO = new GameObject("BootStatusCanvas");
+            Canvas canvas = canvasGO.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 100;
+            GameObject textGO = new GameObject("BootStatus");
+            RectTransform rt = textGO.AddComponent<RectTransform>();
+            rt.SetParent(canvasGO.transform, false);
+            rt.anchorMin = new Vector2(0.5f, 1f);
+            rt.anchorMax = new Vector2(0.5f, 1f);
+            rt.anchoredPosition = new Vector2(0f, -30f);
+            rt.sizeDelta = new Vector2(1100f, 40f);
+            Text t = textGO.AddComponent<Text>();
+            Font f = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (f == null) f = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            t.font = f;
+            t.fontSize = 24;
+            t.alignment = TextAnchor.MiddleCenter;
+            t.color = Color.white;
+            t.text = "Village: starting...";
+            Shadow sh = textGO.AddComponent<Shadow>();
+            sh.effectColor = new Color(0f, 0f, 0f, 0.9f);
+            sh.effectDistance = new Vector2(2f, -2f);
+            bootStatusText = t;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Boot status UI failed: " + e.Message);
+        }
+    }
+
+    private void SetBootStatus(string msg)
+    {
+        if (bootStatusText != null)
+        {
+            bootStatusText.text = msg;
+        }
+        Debug.Log("[Village] " + msg);
+    }
+
+    private int CountVillageObjects()
+    {
+        if (villageRoot == null) return 0;
+        return villageRoot.GetComponentsInChildren<Transform>(true).Length - 1;
+    }
+
+    // After the follow camera settles, verify the player and at least one
+    // house are actually inside the camera frustum. If not, reset to the
+    // known-good starter view instead of showing an empty frame.
+    private System.Collections.IEnumerator VerifyCameraView()
+    {
+        yield return new WaitForSeconds(0.6f);
+        if (mainCam == null) yield break;
+        try
+        {
+            Plane[] planes = GeometryUtility.CalculateFrustumPlanes(mainCam);
+            bool playerVisible = false;
+            GameObject player = GameObject.Find("Player");
+            if (player != null)
+            {
+                Renderer pr = player.GetComponentInChildren<Renderer>();
+                if (pr != null) playerVisible = GeometryUtility.TestPlanesAABB(planes, pr.bounds);
+            }
+            int housesVisible = 0;
+            foreach (string houseName in new string[] { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6" })
+            {
+                GameObject h = GameObject.Find(houseName);
+                if (h == null) continue;
+                Renderer[] rs = h.GetComponentsInChildren<Renderer>();
+                foreach (Renderer r in rs)
+                {
+                    if (GeometryUtility.TestPlanesAABB(planes, r.bounds)) { housesVisible++; break; }
+                }
+            }
+            Debug.Log("[Village] Camera check: player visible=" + playerVisible + ", houses visible=" + housesVisible);
+            if (!playerVisible || housesVisible < 1)
+            {
+                Debug.LogError("[Village] Camera view check FAILED — resetting to starter view");
+                SetBootStatus("Camera view failed — reset to starter view");
+                CameraFollow follow = mainCam.GetComponent<CameraFollow>();
+                if (follow != null) follow.ResetToStarterView();
+                else
+                {
+                    mainCam.transform.position = new Vector3(0f, 3f, -8f);
+                    mainCam.transform.rotation = Quaternion.Euler(20f, 0f, 0f);
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Camera view check error: " + e.Message);
+        }
     }
 
     void Update()
@@ -127,7 +272,16 @@ public class VillageBuilder : MonoBehaviour
     }
 
     // ------------------------------------------------------------------
-    // Materials (Standard shader PBR; albedo from Poly Haven CC0 1k maps)
+    // Materials. FIX (blank scene on device): materials were created at
+    // runtime with Shader.Find("Standard"), but the Standard shader was
+    // stripped from the Android build (no asset referenced it), so
+    // new Material(null) threw and Awake died before building anything.
+    // Now the six textured materials are real .mat assets under
+    // Assets/Resources/Materials/ (their Standard-shader reference keeps
+    // the shader in the build) and are loaded by name. Flat/emissive
+    // materials are built at runtime from that same shader. Nothing here
+    // may throw: a null material leaves the renderer's default material
+    // (visible) instead of killing the village.
     // ------------------------------------------------------------------
     private Texture2D LoadTex(string name)
     {
@@ -139,9 +293,68 @@ public class VillageBuilder : MonoBehaviour
         return t;
     }
 
+    private Material LoadMaterialAsset(string name)
+    {
+        try
+        {
+            Material m = Resources.Load<Material>("Materials/" + name);
+            if (m == null)
+            {
+                Debug.LogError("[Village] Material asset missing: Materials/" + name);
+            }
+            return m;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("[Village] Material load failed: " + name + " — " + e.Message);
+            return null;
+        }
+    }
+
+    private void AssignTex(Material m, string texName, Vector2 tiling)
+    {
+        if (m == null) return;
+        try
+        {
+            if (m.mainTexture == null)
+            {
+                Texture2D t = Resources.Load<Texture2D>("Textures/" + texName);
+                if (t != null)
+                {
+                    m.mainTexture = t;
+                    m.mainTextureScale = tiling;
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Texture assign failed: " + texName + " — " + e.Message);
+        }
+    }
+
+    private Shader GetStandardShader()
+    {
+        if (standardShader != null) return standardShader;
+        if (matGround != null && matGround.shader != null)
+        {
+            standardShader = matGround.shader;
+            return standardShader;
+        }
+        Shader s = null;
+        try { s = Shader.Find("Standard"); } catch (System.Exception) { s = null; }
+        if (s != null) standardShader = s;
+        return s;
+    }
+
     private Material MakeMat(string name, Texture2D tex, Color tint, float smoothness, Vector2 tiling)
     {
-        Material m = new Material(Shader.Find("Standard"));
+        Shader s = GetStandardShader();
+        if (s == null)
+        {
+            Debug.LogError("[Village] Standard shader not available for " + name);
+            return null;
+        }
+        Material m = new Material(s);
         m.name = name;
         if (tex != null)
         {
@@ -156,7 +369,13 @@ public class VillageBuilder : MonoBehaviour
 
     private Material MakeFlat(string name, Color color, float smoothness)
     {
-        Material m = new Material(Shader.Find("Standard"));
+        Shader s = GetStandardShader();
+        if (s == null)
+        {
+            Debug.LogError("[Village] Standard shader not available for " + name);
+            return null;
+        }
+        Material m = new Material(s);
         m.name = name;
         m.color = color;
         m.SetFloat("_Metallic", 0f);
@@ -166,7 +385,13 @@ public class VillageBuilder : MonoBehaviour
 
     private Material MakeEmissive(string name, Color color, Color emission)
     {
-        Material m = new Material(Shader.Find("Standard"));
+        Shader s = GetStandardShader();
+        if (s == null)
+        {
+            Debug.LogError("[Village] Standard shader not available for " + name);
+            return null;
+        }
+        Material m = new Material(s);
         m.name = name;
         m.color = color;
         m.SetColor("_EmissionColor", emission);
@@ -178,12 +403,37 @@ public class VillageBuilder : MonoBehaviour
 
     private void BuildMaterials()
     {
-        matGround = MakeMat("GroundMud", LoadTex("ground_mud"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(14f, 14f));
-        matPlaster = MakeMat("WallPlaster", LoadTex("wall_plaster"), new Color(0.92f, 0.85f, 0.72f), 0.15f, new Vector2(2f, 1.5f));
-        matWood = MakeMat("WoodPlanks", LoadTex("wood_planks"), new Color(0.75f, 0.6f, 0.42f), 0.3f, new Vector2(1f, 1f));
-        matRoof = MakeMat("RoofTiles", LoadTex("roof_tiles"), new Color(0.95f, 0.8f, 0.62f), 0.25f, new Vector2(3f, 2f));
-        matStone = MakeMat("StoneWall", LoadTex("stone_wall"), new Color(0.8f, 0.78f, 0.72f), 0.1f, new Vector2(2f, 1f));
-        matGrass = MakeMat("FieldGrass", LoadTex("field_grass"), new Color(0.7f, 0.8f, 0.55f), 0.05f, new Vector2(4f, 3f));
+        // Real .mat assets first (keeps the Standard shader in the build).
+        matGround = LoadMaterialAsset("GroundMud");
+        matPlaster = LoadMaterialAsset("WallPlaster");
+        matWood = LoadMaterialAsset("WoodPlanks");
+        matRoof = LoadMaterialAsset("RoofTiles");
+        matStone = LoadMaterialAsset("StoneWall");
+        matGrass = LoadMaterialAsset("FieldGrass");
+
+        // Fallback: rebuild any missing .mat at runtime from its texture.
+        if (matGround == null) matGround = MakeMat("GroundMud", LoadTex("ground_mud"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(14f, 14f));
+        if (matPlaster == null) matPlaster = MakeMat("WallPlaster", LoadTex("wall_plaster"), new Color(0.92f, 0.85f, 0.72f), 0.15f, new Vector2(2f, 1.5f));
+        if (matWood == null) matWood = MakeMat("WoodPlanks", LoadTex("wood_planks"), new Color(0.75f, 0.6f, 0.42f), 0.3f, new Vector2(1f, 1f));
+        if (matRoof == null) matRoof = MakeMat("RoofTiles", LoadTex("roof_tiles"), new Color(0.95f, 0.8f, 0.62f), 0.25f, new Vector2(3f, 2f));
+        if (matStone == null) matStone = MakeMat("StoneWall", LoadTex("stone_wall"), new Color(0.8f, 0.78f, 0.72f), 0.1f, new Vector2(2f, 1f));
+        if (matGrass == null) matGrass = MakeMat("FieldGrass", LoadTex("field_grass"), new Color(0.7f, 0.8f, 0.55f), 0.05f, new Vector2(4f, 3f));
+
+        // Safety net: re-assign textures by name if a loaded .mat lost its reference.
+        AssignTex(matGround, "ground_mud", new Vector2(14f, 14f));
+        AssignTex(matPlaster, "wall_plaster", new Vector2(2f, 1.5f));
+        AssignTex(matWood, "wood_planks", new Vector2(1f, 1f));
+        AssignTex(matRoof, "roof_tiles", new Vector2(3f, 2f));
+        AssignTex(matStone, "stone_wall", new Vector2(2f, 1f));
+        AssignTex(matGrass, "field_grass", new Vector2(4f, 3f));
+
+        // Resolve the Standard shader once for the flat/emissive materials.
+        standardShader = (matGround != null && matGround.shader != null) ? matGround.shader : Shader.Find("Standard");
+        if (standardShader == null)
+        {
+            Debug.LogError("[Village] Standard shader NOT found even after .mat loads!");
+        }
+
         matLeaf = MakeFlat("Leaves", new Color(0.10f, 0.22f, 0.08f), 0.05f);
         matTrunk = MakeFlat("Trunk", new Color(0.16f, 0.10f, 0.06f), 0.1f);
         matDark = MakeFlat("MonsterDark", new Color(0.02f, 0.02f, 0.025f), 0.0f);
@@ -264,20 +514,45 @@ public class VillageBuilder : MonoBehaviour
         return t;
     }
 
+    // Glow quad using the Standard shader in transparent mode (the
+    // Unlit/Transparent shader is not guaranteed in the build either).
+    // Cosmetic only: on any failure the glow is skipped, never fatal.
     private GameObject MakeGlowQuad(string name, Vector3 pos, float size, Color color)
     {
-        GameObject go = new GameObject(name);
-        go.transform.SetParent(villageRoot, false);
-        go.transform.position = pos;
-        go.transform.localScale = new Vector3(size, size, size);
-        MeshRenderer r = go.AddComponent<MeshRenderer>();
-        MeshFilter f = go.AddComponent<MeshFilter>();
-        f.mesh = BuildQuadMesh();
-        Material m = new Material(Shader.Find("Unlit/Transparent"));
-        m.mainTexture = MakeRadialGlowTexture();
-        m.color = color;
-        r.material = m;
-        return go;
+        try
+        {
+            Shader s = GetStandardShader();
+            if (s == null)
+            {
+                Debug.LogWarning("[Village] Glow quad skipped (no Standard shader): " + name);
+                return null;
+            }
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(villageRoot, false);
+            go.transform.position = pos;
+            go.transform.localScale = new Vector3(size, size, size);
+            MeshRenderer r = go.AddComponent<MeshRenderer>();
+            MeshFilter f = go.AddComponent<MeshFilter>();
+            f.mesh = BuildQuadMesh();
+            Material m = new Material(s);
+            m.mainTexture = MakeRadialGlowTexture();
+            m.color = color;
+            m.SetFloat("_Mode", 3f);
+            m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            m.SetInt("_ZWrite", 0);
+            m.DisableKeyword("_ALPHATEST_ON");
+            m.EnableKeyword("_ALPHABLEND_ON");
+            m.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            m.renderQueue = 3000;
+            r.material = m;
+            return go;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Glow quad failed: " + name + " — " + e.Message);
+            return null;
+        }
     }
 
     private Mesh BuildQuadMesh()
@@ -311,7 +586,7 @@ public class VillageBuilder : MonoBehaviour
         if (ground != null)
         {
             Renderer r = ground.GetComponent<Renderer>();
-            if (r != null)
+            if (r != null && matGround != null)
             {
                 r.material = matGround;
             }

@@ -64,3 +64,11 @@ jobs:
         with:
           name: APK
           path: build/Android
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: TestScreenshots/**
+          if-no-files-found: warn

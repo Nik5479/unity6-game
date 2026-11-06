@@ -20,7 +20,12 @@ PlayerSettings:
   defaultScreenWidthWeb: 960
   defaultScreenHeightWeb: 600
   runInBackground: 1
-  defaultOrientation: 3
+  defaultScreenOrientation: 4
+  allowedAutorotateToPortrait: 0
+  allowedAutorotateToPortraitUpsideDown: 0
+  allowedAutorotateToLandscapeRight: 1
+  allowedAutorotateToLandscapeLeft: 1
+  useOSAutorotation: 0
   activeInputHandler: 2
   usePlayerLog: 1
   applicationIdentifier:
