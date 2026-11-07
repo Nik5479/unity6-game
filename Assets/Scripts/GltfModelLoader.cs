@@ -4,15 +4,21 @@ using GLTFast;
 using UnityEngine;
 
 /// <summary>
-/// Loads .glb models at runtime from Assets/StreamingAssets/Models/
-/// via glTFast (com.atteneder.gltfast 6.20.0). Sketchfab models arrive in
-/// wildly inconsistent units (metres, centimetres, millimetres, arbitrary),
+/// Loads .glb AND .gltf models at runtime from Assets/StreamingAssets/Models/
+/// via glTFast (com.atteneder.gltfast 6.20.0). fileName may include a
+/// subfolder (e.g. "SoilGround/xdhhdhl_tier_2.gltf") — glTFast resolves a
+/// .gltf's .bin + textures relative to the .gltf file, so the whole bundle
+/// folder goes under Models/. Sketchfab models arrive in wildly
+/// inconsistent units (metres, centimetres, millimetres, arbitrary),
 /// so every model is normalised by its rendered bounds: uniform scale so
 /// its target dimension matches, then grounded (bounds.min.y = 0) and
 /// centred on its placement point. A model that fails to load is logged
 /// and skipped — it must never kill the village. The holder GameObject is
 /// created immediately (so GameObject.Find works before the load finishes)
 /// and destroyed again on failure, so fallbacks can reuse the same name.
+/// NOTE: on Android, StreamingAssets live inside the APK (jar: URL) and
+/// glTFast loads .gltf bundles through UnityWebRequest; a .gltf whose
+/// relative resources fail to resolve is skipped like any other failure.
 /// </summary>
 public static class GltfModelLoader
 {

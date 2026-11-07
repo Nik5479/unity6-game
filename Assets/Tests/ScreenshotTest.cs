@@ -33,19 +33,25 @@ public class ScreenshotTest
         yield return SceneManager.LoadSceneAsync("Main");
 
         // Phase 3: real .glb models load async via glTFast — wait for them
-        // (max 90 s) before asserting, so the test checks the REAL village
-        // and the screenshots show it. The signal is a "ModelsLoaded"
-        // GameObject: the test assembly cannot reference game classes
-        // (CS0246), so no VillageBuilder type is named here.
+        // (max 150 s — Phase 4 added many heavy models, incl. a 58 MB
+        // shivling and a 30 MB chicken) before asserting, so the test
+        // checks the REAL village and the screenshots show it. The signal
+        // is a "ModelsLoaded" GameObject: the test assembly cannot
+        // reference game classes (CS0246), so no VillageBuilder type is
+        // named here.
         yield return new WaitForSeconds(1f);
         float modelWait = 0f;
-        while (GameObject.Find("ModelsLoaded") == null && modelWait < 90f)
+        while (GameObject.Find("ModelsLoaded") == null && modelWait < 150f)
         {
             yield return new WaitForSeconds(0.5f);
             modelWait += 0.5f;
         }
         Debug.Log("[Test] Waited " + modelWait + "s for models; loaded="
             + (GameObject.Find("ModelsLoaded") != null));
+
+        // Let the follow camera settle on its target before the
+        // frustum checks (it lerps into place over ~1 s).
+        yield return new WaitForSeconds(1.5f);
 
         var player = GameObject.Find("Player");
         Assert.IsNotNull(player, "Player not found in Main scene");
@@ -119,13 +125,29 @@ public class ScreenshotTest
         }
         Assert.GreaterOrEqual(labeledButtons, 3, "Fewer than 3 buttons with readable labels + UI/Default material");
 
-        // (c3) Nilesh must be a clothed humanoid, not the old dark capsule.
-        GameObject head = GameObject.Find("Player/Figure/Head");
-        Assert.IsNotNull(head, "Player figure Head not found — humanoid figure did not build");
-        GameObject pagdi = GameObject.Find("Player/Figure/Pagdi");
-        Assert.IsNotNull(pagdi, "Player figure Pagdi not found — humanoid figure did not build");
-        GameObject torso = GameObject.Find("Player/Figure/Torso");
-        Assert.IsNotNull(torso, "Player figure Torso not found — humanoid figure did not build");
+        // (c3) Nilesh must be the REAL rigged indian_man.glb model
+        // ("Player/Nilesh", Phase 4), not the old dark capsule and not
+        // the Phase 2 primitive humanoid. Fallback: if the .glb failed
+        // to load, the builder falls back to the primitive figure
+        // ("Player/Figure/Head|Pagdi|Torso") — accept that too, so a
+        // single model failure cannot fail the whole test.
+        GameObject nilesh = GameObject.Find("Player/Nilesh");
+        if (nilesh != null)
+        {
+            Renderer[] nileshRenderers = nilesh.GetComponentsInChildren<Renderer>();
+            Debug.Log("[Test] Real Nilesh model found, renderers=" + nileshRenderers.Length);
+            Assert.Greater(nileshRenderers.Length, 0, "Player/Nilesh has no renderers — real model did not build");
+        }
+        else
+        {
+            Debug.LogWarning("[Test] Player/Nilesh missing — checking primitive-figure fallback");
+            GameObject head = GameObject.Find("Player/Figure/Head");
+            Assert.IsNotNull(head, "Player figure Head not found — neither real Nilesh nor humanoid figure built");
+            GameObject pagdi = GameObject.Find("Player/Figure/Pagdi");
+            Assert.IsNotNull(pagdi, "Player figure Pagdi not found — humanoid figure did not build");
+            GameObject torso = GameObject.Find("Player/Figure/Torso");
+            Assert.IsNotNull(torso, "Player figure Torso not found — humanoid figure did not build");
+        }
 
         // Screenshot 1: day view from the gameplay camera.
         string shot1 = RenderScreenshot(cam, "main-scene.png", 1280, 720);

@@ -11,9 +11,13 @@ using UnityEngine.EventSystems;
 public class CameraFollow : MonoBehaviour
 {
     public Transform target;
-    public float distance = 7f;
-    public float height = 3.4f;
-    public float pitch = 14f;
+    // Phase 4 (fix-push): pulled back + higher + wider pitch so the
+    // gameplay camera sees >= 3 houses from the chowk spawn. Run #19
+    // failed the screenshot test with only 2 houses in the frustum at
+    // distance 7 / height 3.4 / pitch 14 with the default 60-degree FOV.
+    public float distance = 9f;
+    public float height = 4.6f;
+    public float pitch = 18f;
 
     private float yaw;
     private float shakeAmount;
@@ -61,8 +65,10 @@ public class CameraFollow : MonoBehaviour
     /// </summary>
     public void ResetToStarterView()
     {
-        transform.position = new Vector3(0f, 3f, -8f);
-        transform.rotation = Quaternion.Euler(20f, 0f, 0f);
+        // Phase 4: same wide framing as the normal follow view (see
+        // distance/height/pitch above) so a reset still shows >= 3 houses.
+        transform.position = new Vector3(0f, 4f, -10f);
+        transform.rotation = Quaternion.Euler(22f, 0f, 0f);
         enabled = false;
     }
 

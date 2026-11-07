@@ -138,6 +138,19 @@ activations can trigger a Unity 1-hour lockout. One push = one build.
 - stealth86 — Thatched Hut, Mango Tree
 - Glowbox 3D — Old Well with Hanging Bucket
 - rakutin — Medieval Wooden Cart
+- lonewolf37 (37omkar) — Pujari-Mahant-Guru (CC-BY)
+- Shamanek — Small Grave (via Fab)
+- Quixel Megascans (via Fab, free library) — Fallen Pine Tree, Soil Ground,
+  Forest Floor, Wicker Basket, Wooden Stand, Sandstone Rocky Ground,
+  Grave Stone Collection
+- PlantCatalog — Realistic HD Chinaberry tree (13/30), used as the neem
+  tree (CC-BY)
+- Nodeaxis — Indian Woman in Saree (Meera, Free Standard)
+- Meshy (free tier — personal/evaluation use only; a paid plan is needed
+  for final commercial use) — Haveli, Mukhiya
+- Poly Haven (CC0, no credit required) — brick, thatch, clay, mud,
+  bark, cobblestone, grass, roof-tile textures; brass diya lantern,
+  Lantern_01, moonless-golf night HDRI
 - Other models in `Assets/StreamingAssets/Models/` are CC Attribution
   Sketchfab models, credited by model name in the game credits.
 - Skipped on purpose (low-poly / stylised — would break the realistic

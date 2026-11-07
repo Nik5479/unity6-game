@@ -64,9 +64,24 @@ public static class VillageColliders
 ///    field, fences, moon and the jungle-edge tree ring.
 ///  - working door (hinge) on Nilesh's house, monster figure, food
 ///    pickup near the well
-///  - player figure: clothed humanoid (cream kurta, skin head, saffron
-///    pagdi, dark pants) with walk bob — TEMPORARY placeholder until the
-///    real indian_man.glb arrives; same capsule collider as before
+///  - player figure: the REAL rigged indian_man.glb (Phase 4) as Nilesh;
+///    the Phase 2 clothed humanoid (cream kurta, skin head, saffron
+///    pagdi, dark pants) survives only as a fallback if the .glb fails
+///    to load. Same capsule collider as before.
+///  - Phase 4 (fix-push): the screenshot test failed on run #19 (only 2
+///    of 6 houses in the camera frustum), so the follow camera is pulled
+///    back / raised / widened (CameraFollow distance 9, height 4.6,
+///    pitch 18 + 70-degree FOV set in SetupSystems) and VerifyCameraView
+///    now requires the same >= 3 houses the test requires. New real
+///    models: school, temple (shivling + pujari), chickens, dock, basket,
+///    wooden stand, sandstone ground, soil + forest floor (.gltf), grave
+///    stones, small grave (FBX), fallen pine (FBX), diya + chowk lanterns
+///    (.gltf), neem substitute (PlantCatalog chinaberry, 2 instances),
+///    MEERA (rigged indian_woman_in_saree, chowk NPC), HAVELI + MUKHIYA
+///    (Meshy free tier), and a second rigged indian_man (sunglasses)
+///    as a villager
+///    NPC. Poly Haven CC0 1K textures are used for brick, thatch, mud
+///    and cobble materials.
 /// Materials are real .mat assets (Assets/Resources/Materials/) loaded by
 /// name, so the Standard shader is referenced by assets and included in
 /// the build — runtime Shader.Find is only a fallback. Each build step is
@@ -108,6 +123,11 @@ public class VillageBuilder : MonoBehaviour
     private Material matEye;
     private Material matLampGlass;
     private Material matShadowBlob;
+    // Phase 4: Poly Haven CC0 1K textures (Assets/Resources/Textures/).
+    private Material matBrick;
+    private Material matThatch;
+    private Material matMudDry;
+    private Material matCobble;
 
     private Transform villageRoot;
     private Camera mainCam;
@@ -167,11 +187,14 @@ public class VillageBuilder : MonoBehaviour
         bool ok = false;
         try
         {
+            yield return BuildPlayerModelAsync();
             yield return BuildHousesAsync();
             yield return BuildWellAndLampAsync();
             RunStep("Field", BuildField);
             yield return BuildJungleAndFencesAsync();
             yield return BuildPropsAsync();
+            RunStep("Temple", BuildTemple);
+            yield return BuildNewModelsAsync();
             RunStep("Moon", BuildMoon);
             RunStep("SetupSystems", SetupSystems);
             RunStep("SceneAmbience", SetupSceneAmbience);
@@ -291,7 +314,10 @@ public class VillageBuilder : MonoBehaviour
                 }
             }
             Debug.Log("[Village] Camera check: player visible=" + playerVisible + ", houses visible=" + housesVisible);
-            if (!playerVisible || housesVisible < 1)
+            // Same bar as the CI screenshot test (>= 3 houses): if the
+            // view fails, reset to the starter view instead of showing
+            // an empty frame.
+            if (!playerVisible || housesVisible < 3)
             {
                 Debug.LogError("[Village] Camera view check FAILED — resetting to starter view");
                 SetBootStatus("Camera view failed — reset to starter view");
@@ -503,6 +529,15 @@ public class VillageBuilder : MonoBehaviour
         matEye = MakeEmissive("MonsterEyes", new Color(0.9f, 0.85f, 0.6f), new Color(1.4f, 1.1f, 0.35f));
         matLampGlass = MakeEmissive("LampGlass", new Color(1f, 0.85f, 0.55f), new Color(1.6f, 1.0f, 0.35f));
         matShadowBlob = MakeTransparent("ShadowBlob", new Color(0f, 0f, 0f, 0.35f));
+
+        // Phase 4: Poly Haven CC0 1K textures — brick (temple), thatch
+        // (temple roof), dry mud (dirt paths), cobble (chowk paving).
+        // LoadTex warns and returns null if a texture is missing, so a
+        // missing texture leaves a flat colour instead of killing the build.
+        matBrick = MakeMat("Brick", LoadTex("brick_4_diff_1k"), Color.white, 0.1f, new Vector2(2f, 1f));
+        matThatch = MakeMat("Thatch", LoadTex("thatch_roof_angled_diff_1k"), new Color(0.9f, 0.85f, 0.7f), 0.05f, new Vector2(2f, 2f));
+        matMudDry = MakeMat("MudDry", LoadTex("brown_mud_dry_diff_1k"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(2f, 2f));
+        matCobble = MakeMat("Cobble", LoadTex("cobblestone_floor_04_diff_1k"), new Color(0.85f, 0.84f, 0.8f), 0.1f, new Vector2(4f, 4f));
     }
 
     // Transparent flat material (ground shadow blobs, dirt patches).
@@ -679,12 +714,22 @@ public class VillageBuilder : MonoBehaviour
         }
 
         // Dirt path patches along the main lane (worn ground, darker mud).
-        Material dirt = MakeFlat("DirtPath", new Color(0.45f, 0.35f, 0.24f), 0.05f);
+        // Phase 4: real dry-mud texture when available, flat colour fallback.
+        Material dirt = (matMudDry != null)
+            ? matMudDry
+            : MakeFlat("DirtPath", new Color(0.45f, 0.35f, 0.24f), 0.05f);
         for (int i = 0; i < 6; i++)
         {
             float z = -10f + i * 4f;
             GameObject patch = Box("DirtPath", new Vector3(0f, 0.03f, z), new Vector3(2.4f, 0.04f, 3.4f), dirt, villageRoot);
             Destroy(patch.GetComponent<Collider>());
+        }
+
+        // Phase 4: cobbled chowk circle around the village centre.
+        if (matCobble != null)
+        {
+            GameObject chowk = Cylinder("ChowkCobble", new Vector3(0f, 0.02f, 0f), new Vector3(9f, 0.04f, 9f), matCobble, villageRoot);
+            Destroy(chowk.GetComponent<Collider>());
         }
 
         // Grass tufts near the field edge.
@@ -711,11 +756,13 @@ public class VillageBuilder : MonoBehaviour
             cubeRenderer.enabled = false;
         }
 
-        // Nilesh — clothed humanoid figure (TEMPORARY placeholder until the
-        // real indian_man.glb arrives: cream kurta, skin head, saffron
-        // pagdi, dark pants). Same capsule collider + camera logic as
-        // before; only the visuals changed. All parts hang under a
-        // "Figure" container so CharacterWalk can bob/swing them.
+        // Nilesh — clothed humanoid figure (cream kurta, skin head, saffron
+        // pagdi, dark pants). Phase 4: this is now only the FALLBACK —
+        // BuildPlayerModelAsync (first step of BuildVillageAsync) swaps
+        // in the real rigged indian_man.glb as "Player/Nilesh" and removes
+        // this figure. Same capsule collider + camera logic as before;
+        // only the visuals changed. All parts hang under a "Figure"
+        // container so CharacterWalk can bob/swing them.
         Transform root = player.transform;
         GameObject figure = new GameObject("Figure");
         figure.transform.SetParent(root, false);
@@ -780,6 +827,54 @@ public class VillageBuilder : MonoBehaviour
         walk.armR = armR.transform;
         walk.legL = legL.transform;
         walk.legR = legR.transform;
+    }
+
+    // Phase 4: THE REAL NILESH. Loads the rigged indian_man.glb under
+    // the Player root as "Nilesh" (1.7 m tall, static pose — the .glb's
+    // single animation is NOT retargeted in this push; animation is a
+    // later step, never a blocker). On success the primitive fallback
+    // figure is removed and CharacterWalk is repointed at the real model
+    // (arms/legs null — CharacterWalk null-checks them, bob still works).
+    // On failure the primitive figure stays, so the game still works and
+    // the (c3) test falls back to checking it.
+    private System.Collections.IEnumerator BuildPlayerModelAsync()
+    {
+        GameObject player = GameObject.Find("Player");
+        if (player == null)
+        {
+            Debug.LogWarning("[Village] Player missing — real Nilesh model skipped");
+            yield break;
+        }
+        GameObject nilesh = null;
+        yield return GltfModelLoader.LoadModel(
+            "indian_man_77_hwkm.glb", player.transform, "Nilesh",
+            player.transform.position, 0f, 1.7f,
+            GltfModelLoader.NormalizeMode.ByHeight,
+            GltfModelLoader.ColliderMode.None, g => nilesh = g);
+        if (nilesh == null)
+        {
+            Debug.LogWarning("[Village] Real Nilesh model failed to load — keeping primitive figure");
+            yield break;
+        }
+        // Remove the primitive fallback figure.
+        Transform oldFigure = player.transform.Find("Figure");
+        if (oldFigure != null)
+        {
+            Object.Destroy(oldFigure.gameObject);
+        }
+        // Repoint the walk bob at the real model (no arm/leg refs — the
+        // rigged model has no primitive limbs to swing).
+        CharacterWalk walk = player.GetComponent<CharacterWalk>();
+        if (walk == null)
+        {
+            walk = player.AddComponent<CharacterWalk>();
+        }
+        walk.figureRoot = nilesh.transform;
+        walk.armL = null;
+        walk.armR = null;
+        walk.legL = null;
+        walk.legR = null;
+        Debug.Log("[Village] Real Nilesh model active (indian_man.glb)");
     }
 
     // ------------------------------------------------------------------
@@ -1257,6 +1352,237 @@ public class VillageBuilder : MonoBehaviour
         }
     }
 
+    // ------------------------------------------------------------------
+    // Phase 4: temple + new real models.
+    // ------------------------------------------------------------------
+    // Primitive temple (south of the chowk, facing north): brick walls,
+    // stone plinth, thatch roof. The real shivling .glb is placed inside
+    // it and the pujari .glb stands at its entrance in BuildNewModelsAsync.
+    private void BuildTemple()
+    {
+        Vector3 c = new Vector3(2f, 0f, -17f);
+        Material brick = (matBrick != null) ? matBrick : matPlaster;
+        Material thatch = (matThatch != null) ? matThatch : matRoof;
+        Transform root = new GameObject("Temple").transform;
+        root.SetParent(villageRoot, false);
+        root.position = c;
+
+        Box("Temple_Plinth", c + new Vector3(0f, 0.15f, 0f), new Vector3(5.5f, 0.3f, 5.5f), matStone, root);
+        // Back (south) + side walls; front (north) stays open.
+        Box("Temple_WallBack", c + new Vector3(0f, 1.8f, -2.35f), new Vector3(5f, 3f, 0.3f), brick, root);
+        Box("Temple_WallSideA", c + new Vector3(-2.35f, 1.8f, 0f), new Vector3(0.3f, 3f, 4.7f), brick, root);
+        Box("Temple_WallSideB", c + new Vector3(2.35f, 1.8f, 0f), new Vector3(0.3f, 3f, 4.7f), brick, root);
+        // Front pillars.
+        Box("Temple_PillarA", c + new Vector3(-2.35f, 1.8f, 2.35f), new Vector3(0.4f, 3f, 0.4f), matStone, root);
+        Box("Temple_PillarB", c + new Vector3(2.35f, 1.8f, 2.35f), new Vector3(0.4f, 3f, 0.4f), matStone, root);
+        // Sloped thatch roof: two panels + ridge + finial.
+        GameObject panelA = Box("Temple_RoofA", c + new Vector3(0f, 3.9f, 1.2f), new Vector3(6f, 0.12f, 3.2f), thatch, root);
+        panelA.transform.rotation = Quaternion.Euler(30f, 0f, 0f);
+        GameObject panelB = Box("Temple_RoofB", c + new Vector3(0f, 3.9f, -1.2f), new Vector3(6f, 0.12f, 3.2f), thatch, root);
+        panelB.transform.rotation = Quaternion.Euler(-30f, 0f, 0f);
+        Box("Temple_Ridge", c + new Vector3(0f, 4.55f, 0f), new Vector3(6f, 0.18f, 0.25f), matWood, root);
+        Sphere("Temple_Finial", c + new Vector3(0f, 4.9f, 0f), new Vector3(0.4f, 0.5f, 0.4f), matLampGlass, root);
+        // Collision: back + side walls (front stays open so the player
+        // can walk in to the shivling).
+        Block(c + new Vector3(0f, 1.5f, -2.35f), new Vector3(5f, 3f, 0.5f));
+        Block(c + new Vector3(-2.35f, 1.5f, 0f), new Vector3(0.5f, 3f, 4.7f));
+        Block(c + new Vector3(2.35f, 1.5f, 0f), new Vector3(0.5f, 3f, 4.7f));
+    }
+
+    // Phase 4: every new real model. Each load is independent — one
+    // failure is logged and skipped, never fatal. .gltf bundles (soil,
+    // forest floor, lanterns) load from their subfolders under
+    // StreamingAssets/Models/ via the same glTFast path as .glb.
+    private System.Collections.IEnumerator BuildNewModelsAsync()
+    {
+        // School landmark (south-west, clear of House_3 and the jungle ring).
+        yield return LoadProp("school-building_74_yizq.glb", "School",
+            new Vector3(-16.5f, 0f, -14f), 25f, 7f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // HAVELI (Meshy, free tier) — the big missing landmark, east of
+        // the chowk facing it. Set back from the jungle ring so it only
+        // brushes one ring tree.
+        yield return LoadProp("meshy_haveli_86_hvl.glb", "Haveli",
+            new Vector3(17f, 0f, -3.5f), -90f, 8f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // Shivling INSIDE the temple (once only — the file is 58 MB).
+        // NOTE (Phase 4): the .glb is EXCLUDED from this push — GitHub's
+        // create-blob API rejects it (60 MB, HTTP 422; proven API limit
+        // is between 35 MB pass and 45 MB fail) AND the source file is
+        // defective (5 of 15 embedded textures are zeroed/garbage).
+        // This LoadProp will log + skip gracefully, so the temple is
+        // empty this run; the shivling needs a fresh Fab re-download
+        // and a proper upload path (local clone push / LFS) in a later
+        // push. Do NOT re-add the file to the push list until then.
+        yield return LoadProp("mahadev_shiv_lingum_c4d_71_52qp.glb", "Shivling",
+            new Vector3(2f, 0f, -17f), 0f, 1.0f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+        // Pujari at the temple entrance, facing the chowk. NOTE: his face
+        // is flat grey with no facial texture — he stands at mid-ground
+        // distance on purpose, never in close-up.
+        yield return LoadProp("pujari-mahant-guru_72_b1y1.glb", "Pujari",
+            new Vector3(2f, 0f, -14.2f), 0f, 1.7f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        // Second villager (rigged indian_man, sunglasses variant) near the handpump.
+        yield return LoadProp("indian_man__sunglasses_76_gmed.glb", "Villager_Man",
+            new Vector3(6.5f, 0f, 10.5f), -60f, 1.7f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        // MEERA — second main character (rigged indian_woman_in_saree,
+        // like Nilesh: static pose first, animation retargeting is a later
+        // step, never a blocker). Stands on the chowk lane by Nilesh's
+        // house, facing the player spawn / camera.
+        yield return LoadProp("indian_woman_in_saree_84_8ssr.glb", "Meera",
+            new Vector3(0.5f, 0f, 6.5f), 180f, 1.65f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        // MUKHIYA (Meshy, free tier) — the old village headman, standing
+        // by the chowk near the well.
+        yield return LoadProp("meshy_mukhiya_87_mky.glb", "Mukhiya",
+            new Vector3(-3.5f, 0f, 2.5f), 45f, 1.7f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        // Chickens (user-made on Meshy) — 2-3 max, near houses.
+        yield return LoadProp("chicken_73_eoja.glb", "Chicken_1",
+            new Vector3(-6.5f, 0f, 8f), 40f, 0.6f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        yield return LoadProp("chicken_73_eoja.glb", "Chicken_2",
+            new Vector3(7f, 0f, 5.5f), -120f, 0.6f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        yield return LoadProp("chicken_73_eoja.glb", "Chicken_3",
+            new Vector3(11f, 0f, -4.5f), 200f, 0.6f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        // Small props: wicker basket by the well, wooden stand by Nilesh's door.
+        yield return LoadProp("historic_miscellaneous_basket_wicker_old_03_xdwjadj_mid_51_y3o8.glb", "Basket",
+            new Vector3(-3f, 0f, -1.5f), 30f, 0.7f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        yield return LoadProp("historic_miscellaneous_stand_wood_old_05_xeokah0_mid_50_69zs.glb", "WoodStand",
+            new Vector3(-5.5f, 0f, 3.5f), -20f, 1.1f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+        // Ground surfaces: sandstone by the temple lane, soil north of the
+        // chowk, forest floor at the south jungle edge.
+        yield return LoadProp("sandstone_rocky_ground_vd3oeic_mid_59_23jb.glb", "SandstoneGround",
+            new Vector3(-2f, 0f, -18f), 0f, 5f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        yield return LoadProp("SoilGround/xdhhdhl_tier_2.gltf", "SoilGround",
+            new Vector3(-4f, 0f, 12f), 0f, 8f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        yield return LoadProp("ForestFloor/sfjmafua_tier_2.gltf", "ForestFloor",
+            new Vector3(6f, 0f, -18f), 0f, 6f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        // Shamshan (south-east corner): grave stone set + small grave.
+        yield return LoadProp("grave_stone_collection_64_7j05.glb", "GraveStones",
+            new Vector3(17f, 0f, -18f), 0f, 3.5f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // Wooden dock/pier at the north village edge (no river mesh yet —
+        // it reads as the pier at the water's edge; river comes later).
+        yield return LoadProp("dock_pier_78_n66e.glb", "Dock",
+            new Vector3(-7f, 0f, 19f), 0f, 6f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        // Lanterns: brass diya inside Nilesh's house, chowk lantern by the lamp.
+        yield return LoadProp("brass_diya_lantern/brass_diya_lantern_1k.gltf", "DiyaLantern",
+            new Vector3(-10.5f, 0f, 4.5f), 0f, 0.45f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        yield return LoadProp("Lantern_01/Lantern_01_1k.gltf", "ChowkLantern",
+            new Vector3(3.2f, 0f, 2.2f), 0f, 0.9f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        // Neem substitute (PlantCatalog Realistic HD Chinaberry tree,
+        // CC-BY, 221,798 tris): 2 instances — one south of the chowk,
+        // one on the north lane. Trunk-only colliders like the other
+        // real trees, so the canopy never walls off an area.
+        yield return LoadProp("realistic_hd_chinaberry_tree_1330_83_1wiy.glb", "Tree_Neem1",
+            new Vector3(4f, 0f, -10f), 0f, 6f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.Trunk);
+        yield return LoadProp("realistic_hd_chinaberry_tree_1330_83_1wiy.glb", "Tree_Neem2",
+            new Vector3(-3f, 0f, 15.5f), 120f, 6f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.Trunk);
+        // FBX props (native Unity import, under Assets/Resources/):
+        // fallen pine at the north-west jungle edge, small grave in the shamshan.
+        RunStep("FallenPine", delegate
+        {
+            GameObject pine = InstantiateResourceModel("FallenPine/FallenPine", "FallenPine",
+                new Vector3(-18f, 0f, 18f), 40f, 4f, false);
+            if (pine == null) Debug.LogWarning("[Village] Fallen pine FBX not placed");
+        });
+        RunStep("SmallGrave", delegate
+        {
+            GameObject grave = InstantiateResourceModel("SmallGrave/SmallGrave", "SmallGrave",
+                new Vector3(14.5f, 0f, -18f), -30f, 1.2f, true);
+            if (grave == null) Debug.LogWarning("[Village] Small grave FBX not placed");
+        });
+    }
+
+    // Instantiates a natively-imported FBX (under Assets/Resources/) and
+    // normalises it by rendered bounds, the same way GltfModelLoader
+    // normalises .glb/.gltf models: uniform scale to the target size,
+    // footprint centred on pos, base on the ground. Rotation is applied
+    // AFTER normalising (a yawed footprint would break the centre shift).
+    // Returns null on any failure — never throws.
+    private GameObject InstantiateResourceModel(
+        string resourcePath, string goName, Vector3 pos, float yaw,
+        float targetSize, bool byHeight)
+    {
+        try
+        {
+            GameObject prefab = Resources.Load<GameObject>(resourcePath);
+            if (prefab == null)
+            {
+                Debug.LogWarning("[Village] Resource model missing: " + resourcePath);
+                return null;
+            }
+            GameObject go = Object.Instantiate(prefab, pos, Quaternion.identity, villageRoot);
+            go.name = goName;
+            Renderer[] renderers = go.GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0)
+            {
+                Debug.LogWarning("[Village] Resource model has no renderers: " + resourcePath);
+                return go;
+            }
+            Bounds b = renderers[0].bounds;
+            foreach (Renderer r in renderers)
+            {
+                b.Encapsulate(r.bounds);
+            }
+            float dim = byHeight ? b.size.y : Mathf.Max(b.size.x, b.size.z);
+            if (dim > 0.001f)
+            {
+                float s = targetSize / dim;
+                if (s > 0.0001f && s < 1000f)
+                {
+                    go.transform.localScale = Vector3.one * s;
+                    renderers = go.GetComponentsInChildren<Renderer>();
+                    b = renderers[0].bounds;
+                    foreach (Renderer r in renderers)
+                    {
+                        b.Encapsulate(r.bounds);
+                    }
+                    Vector3 shift = new Vector3(pos.x - b.center.x, -b.min.y, pos.z - b.center.z);
+                    GameObject content = new GameObject("ModelRoot");
+                    content.transform.SetParent(go.transform, false);
+                    Transform[] children = new Transform[go.transform.childCount];
+                    int n = 0;
+                    foreach (Transform child in go.transform)
+                    {
+                        if (child != content.transform)
+                        {
+                            children[n++] = child;
+                        }
+                    }
+                    for (int i = 0; i < n; i++)
+                    {
+                        children[i].SetParent(content.transform, true);
+                    }
+                    content.transform.localPosition = shift / s;
+                }
+            }
+            go.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+            Debug.Log("[Village] Resource model placed: " + resourcePath + " as " + goName);
+            return go;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Resource model failed: " + resourcePath + " — " + e.Message);
+            return null;
+        }
+    }
+
     private void BuildMoon()
     {
         // Big pale moon low in the sky + soft glow. DayNightCycle fades it in at night.
@@ -1276,6 +1602,13 @@ public class VillageBuilder : MonoBehaviour
         if (pc != null)
         {
             pc.playerCamera = mainCam;
+        }
+
+        // Phase 4: wide 70-degree FOV so the gameplay camera sees >= 3
+        // houses from the chowk (run #19 failed at the default 60).
+        if (mainCam != null)
+        {
+            mainCam.fieldOfView = 70f;
         }
 
         // Third-person follow camera.
