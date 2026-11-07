@@ -1,0 +1,42 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!30 &1
+GraphicsSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 8
+  m_Deferred:
+    m_Mode: 0
+    m_Shader: {fileID: 0}
+  m_DeferredPlus:
+    m_Mode: 0
+    m_Shader: {fileID: 0}
+  m_LightProbeSystem: 0
+  m_LightmapsMode: 0
+  m_LightsUseLinearIntensity: 0
+  m_LightsUseColorTemperature: 0
+  m_UseLegacyLightmaps: 0
+  m_UseLegacyProbes: 0
+  m_DefaultRenderingPath: 1
+  m_DefaultMobileRenderingPath: 1
+  m_TierSettings: []
+  m_LightmapStripping: 0
+  m_FogStripping: 0
+  m_InstancingStripping: 0
+  m_LightmapKeepDynamicPlane: 1
+  m_LightmapKeepDynamic: 1
+  m_AlbedoBoost: 1
+  m_SpecularSmoothnessBoost: 1
+  m_AlwaysIncludedShaders:
+  - {fileID: 46, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 7, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 10753, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 10770, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 15104, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 15105, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 15106, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 16000, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 16001, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 4800000, guid: 99fa998bbbed3408aafa652b466d261d, type: 3}
+  - {fileID: 4800000, guid: f853aafa0bc764a138f572608a37a73c, type: 3}
+  - {fileID: 4800000, guid: 4340a3cf1cde6416d957808a6ac79eed, type: 3}
+  m_PreloadedShaders: []

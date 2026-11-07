@@ -1,0 +1,91 @@
+fileFormatVersion: 2
+guid: 69e3b27e3f30481493d374222b8bb4f4
+ModelImporter:
+  externalObjects: {}
+  serializedVersion: 26
+  fileIDToRecycleName: {}
+  assetBundleName:
+  assetBundleVariant:
+  userData:
+  importerSettingsOverridden: 0
+  animationType: 2
+  humanDescription:
+    serializedVersion: 3
+    human: []
+    skeleton: []
+    armTwist: 0.5
+    foreArmTwist: 0.5
+    upperLegTwist: 0.5
+    legTwist: 0.5
+    armStretch: 0.05
+    legStretch: 0.05
+    feetSpacing: 0
+    rootMotionBoneName:
+    hasTranslationDoF: 0
+    hasExtraRoot: 0
+    skeletonHasParents: 0
+  lastHumanDescriptionAvatarSource: {instanceID: 0}
+  autoGenerateAvatarMappingIfUnspecified: 1
+  animationImportErrors:
+  animationImportWarnings:
+  animationRetargetingWarnings:
+  animationCompression: 1
+  animationRotationError: 0.5
+  animationPositionError: 0.5
+  animationScaleError: 0.5
+  animationWrapMode: 0
+  extraExposedTransformPaths: []
+  extraUserProperties: []
+  clipAnimations: []
+  isReadable: 0
+  meshes:
+    serializedVersion: 2
+    lODScreenPercentages: []
+    globalScale: 1
+    meshCompression: 0
+    addColliders: 0
+    importVisibility: 1
+    importBlendShapes: 0
+    importDeformPercent: 0
+    importNormals: 0
+    importTangents: 0
+    swapUVChannels: 0
+    generateSecondaryUV: 0
+    useFileUnits: 1
+    optimizeMesh: 1
+    keepQuads: 0
+    weldVertices: 1
+    preserveHierarchy: 0
+    indexFormat: 0
+    secondaryUVAngleDistortion: 8
+    secondaryUVAreaDistortion: 15.469999
+    secondaryUVHardAngle: 88
+    secondaryUVPackMargin: 4
+  materials:
+    serializedVersion: 3
+    materialImportMode: 0
+    materialLocation: 1
+    materialName: 0
+    materialSearch: 1
+  tangentSpace:
+    serializedVersion: 2
+    normalSmoothAngle: 60
+    normalImportMode: 0
+    tangentImportMode: 0
+    normalCalculationMode: 0
+    legacyComputeAllNormalsFromSmoothingGroupsWhenMeshHasBlendShapes: 0
+    blendShapeNormalImportMode: 0
+  referencedClips: []
+  importAnimation: 1
+  copyAvatar: 0
+  humanoidOversampling: 1
+  avatarSetup: 0
+  optimizeGameObjects: 0
+  motionNodeName:
+  rigImportErrors:
+  rigImportWarnings:
+  importBlendShapeNormals: 0
+  skinWeightsMode: 0
+  maxBonesPerVertex: 4
+  minBoneWeight: 0.001
+  optimizeBones: 1

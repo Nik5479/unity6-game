@@ -73,7 +73,7 @@ public static class VillageColliders
 ///    back / raised / widened (CameraFollow distance 9, height 4.6,
 ///    pitch 18 + 70-degree FOV set in SetupSystems) and VerifyCameraView
 ///    now requires the same >= 3 houses the test requires. New real
-///    models: school, temple (shivling + pujari), chickens, dock, basket,
+///    models: school, temple (real hindu_temple .glb + pujari), chickens, dock, basket,
 ///    wooden stand, sandstone ground, soil + forest floor (.gltf), grave
 ///    stones, small grave (FBX), fallen pine (FBX), diya + chowk lanterns
 ///    (.gltf), neem substitute (PlantCatalog chinaberry, 2 instances),
@@ -96,8 +96,21 @@ public class VillageBuilder : MonoBehaviour
     // Wired out for other systems.
     public DoorController playerDoor;
     public Transform monster;
+    // Follow-up 2026-11-07: the real HellDemon model, loaded async during
+    // the village build; BuildMonster() returns it when present.
+    private GameObject monsterModel;
     public Transform doorFront;
     public Pickup foodPickup;
+    public Pickup waterPickup;
+    public Pickup medicinePickup;
+    public Pickup batteryPickup;
+    // Fix-push P2-15: NPC spots (same constants as the LoadProp calls in
+    // BuildNewModelsAsync, so the lines work even if a model fails to load).
+    private Vector3 mukhiyaPos = new Vector3(-3.5f, 0f, 2.5f);
+    private Vector3 meeraPos = new Vector3(0.5f, 0f, 6.5f);
+    // (x 2 -> 3.6, 2026-11-07: the visual Pujari was moved 1.6 m east by
+    // cheap-wins; the NPC trigger must sit on the visible priest.)
+    private Vector3 pujariPos = new Vector3(3.6f, 0f, -14.2f);
     public Light lampLight;
     public Material moonMaterial;
     public GameObject lampGlow;
@@ -110,10 +123,6 @@ public class VillageBuilder : MonoBehaviour
     private Material matRoof;
     private Material matStone;
     private Material matGrass;
-    private Material matLeaf;
-    private Material matLeaf2;
-    private Material matLeaf3;
-    private Material matTrunk;
     private Material matDark;
     private Material matGlass;
     private Material matSkin;
@@ -128,6 +137,8 @@ public class VillageBuilder : MonoBehaviour
     private Material matThatch;
     private Material matMudDry;
     private Material matCobble;
+    private Material matLeaves;
+    private Material matWitheredGrass;
 
     private Transform villageRoot;
     private Camera mainCam;
@@ -193,8 +204,10 @@ public class VillageBuilder : MonoBehaviour
             RunStep("Field", BuildField);
             yield return BuildJungleAndFencesAsync();
             yield return BuildPropsAsync();
-            RunStep("Temple", BuildTemple);
             yield return BuildNewModelsAsync();
+            yield return BuildMonsterModelAsync();
+            RunStep("WarmLights", BuildWarmLights);
+            RunStep("CleanupStrays", CleanupStrays);
             RunStep("Moon", BuildMoon);
             RunStep("SetupSystems", SetupSystems);
             RunStep("SceneAmbience", SetupSceneAmbience);
@@ -212,6 +225,9 @@ public class VillageBuilder : MonoBehaviour
         {
             SetBootStatus("Village: " + CountVillageObjects() + " objects built"
                 + (buildErrors > 0 ? " (" + buildErrors + " step errors — see log)" : ""));
+            // One-time environment reflection for the village (URP fix):
+            // render the reflection probe now that every model is loaded.
+            SetupReflectionProbe();
             StartCoroutine(IntroSequence());
             StartCoroutine(VerifyCameraView());
         }
@@ -228,7 +244,7 @@ public class VillageBuilder : MonoBehaviour
         catch (System.Exception e)
         {
             buildErrors++;
-            Debug.LogError("[Village] Build step FAILED: " + name + " — "
+            Debug.LogWarning("[Village] Build step FAILED: " + name + " — "
                 + e.GetType().Name + ": " + e.Message + "\n" + e.StackTrace);
             SetBootStatus("Village: ERROR in " + name + " — continuing");
         }
@@ -319,7 +335,7 @@ public class VillageBuilder : MonoBehaviour
             // an empty frame.
             if (!playerVisible || housesVisible < 3)
             {
-                Debug.LogError("[Village] Camera view check FAILED — resetting to starter view");
+                Debug.LogWarning("[Village] Camera view check FAILED — resetting to starter view");
                 SetBootStatus("Camera view failed — reset to starter view");
                 CameraFollow follow = mainCam.GetComponent<CameraFollow>();
                 if (follow != null) follow.ResetToStarterView();
@@ -381,13 +397,13 @@ public class VillageBuilder : MonoBehaviour
             Material m = Resources.Load<Material>("Materials/" + name);
             if (m == null)
             {
-                Debug.LogError("[Village] Material asset missing: Materials/" + name);
+                Debug.LogWarning("[Village] Material asset missing: Materials/" + name);
             }
             return m;
         }
         catch (System.Exception e)
         {
-            Debug.LogError("[Village] Material load failed: " + name + " — " + e.Message);
+            Debug.LogWarning("[Village] Material load failed: " + name + " — " + e.Message);
             return null;
         }
     }
@@ -422,17 +438,19 @@ public class VillageBuilder : MonoBehaviour
             return standardShader;
         }
         Shader s = null;
-        try { s = Shader.Find("Standard"); } catch (System.Exception) { s = null; }
+        try { s = Shader.Find("Universal Render Pipeline/Lit"); } catch (System.Exception) { s = null; }
+        if (s == null) { try { s = Shader.Find("Standard"); } catch (System.Exception) { s = null; } }
         if (s != null) standardShader = s;
         return s;
     }
 
-    private Material MakeMat(string name, Texture2D tex, Color tint, float smoothness, Vector2 tiling)
+    private Material MakeMat(string name, Texture2D tex, Color tint, float smoothness, Vector2 tiling,
+        Texture2D normalMap = null, Texture2D metalSmoothMap = null, Texture2D aoMap = null)
     {
         Shader s = GetStandardShader();
         if (s == null)
         {
-            Debug.LogError("[Village] Standard shader not available for " + name);
+            Debug.LogWarning("[Village] Standard shader not available for " + name);
             return null;
         }
         Material m = new Material(s);
@@ -445,6 +463,37 @@ public class VillageBuilder : MonoBehaviour
         m.color = tint;
         m.SetFloat("_Metallic", 0f);
         m.SetFloat("_Glossiness", smoothness);
+        m.SetFloat("_Smoothness", smoothness);
+        // Cheap-wins PBR (2026-11-07): Poly Haven normal / metallic-smoothness
+        // (R = metallic 0, A = smoothness from the roughness map) / AO maps.
+        // URP Lit does NOT enable the keywords from SetTexture alone at
+        // runtime — they must be enabled explicitly, or the maps are ignored.
+        // Any map may be null (missing texture) — the material still works.
+        if (normalMap != null)
+        {
+            m.SetTexture("_BumpMap", normalMap);
+            m.SetTextureScale("_BumpMap", tiling);
+            m.SetFloat("_BumpScale", 1f);
+            m.EnableKeyword("_NORMALMAP");
+        }
+        if (metalSmoothMap != null)
+        {
+            m.SetTexture("_MetallicGlossMap", metalSmoothMap);
+            m.SetTextureScale("_MetallicGlossMap", tiling);
+            // The packed map drives smoothness via its alpha channel, so the
+            // scalar multiplier must be 1 or it would flatten the map out.
+            m.SetFloat("_Smoothness", 1f);
+            m.SetFloat("_Glossiness", 1f);
+            m.SetFloat("_SmoothnessTextureChannel", 0f);
+            m.EnableKeyword("_METALLICSPECGLOSSMAP");
+        }
+        if (aoMap != null)
+        {
+            m.SetTexture("_OcclusionMap", aoMap);
+            m.SetTextureScale("_OcclusionMap", tiling);
+            m.SetFloat("_OcclusionStrength", 1f);
+            m.EnableKeyword("_OCCLUSIONMAP");
+        }
         return m;
     }
 
@@ -453,7 +502,7 @@ public class VillageBuilder : MonoBehaviour
         Shader s = GetStandardShader();
         if (s == null)
         {
-            Debug.LogError("[Village] Standard shader not available for " + name);
+            Debug.LogWarning("[Village] Standard shader not available for " + name);
             return null;
         }
         Material m = new Material(s);
@@ -461,6 +510,7 @@ public class VillageBuilder : MonoBehaviour
         m.color = color;
         m.SetFloat("_Metallic", 0f);
         m.SetFloat("_Glossiness", smoothness);
+        m.SetFloat("_Smoothness", smoothness);
         return m;
     }
 
@@ -469,7 +519,7 @@ public class VillageBuilder : MonoBehaviour
         Shader s = GetStandardShader();
         if (s == null)
         {
-            Debug.LogError("[Village] Standard shader not available for " + name);
+            Debug.LogWarning("[Village] Standard shader not available for " + name);
             return null;
         }
         Material m = new Material(s);
@@ -479,6 +529,7 @@ public class VillageBuilder : MonoBehaviour
         m.EnableKeyword("_EMISSION");
         m.SetFloat("_Metallic", 0f);
         m.SetFloat("_Glossiness", 0.2f);
+        m.SetFloat("_Smoothness", 0.2f);
         return m;
     }
 
@@ -493,7 +544,7 @@ public class VillageBuilder : MonoBehaviour
         matGrass = LoadMaterialAsset("FieldGrass");
 
         // Fallback: rebuild any missing .mat at runtime from its texture.
-        if (matGround == null) matGround = MakeMat("GroundMud", LoadTex("ground_mud"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(14f, 14f));
+        if (matGround == null) matGround = MakeMat("GroundMud", LoadTex("ground_mud"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(5f, 5f));
         if (matPlaster == null) matPlaster = MakeMat("WallPlaster", LoadTex("wall_plaster"), new Color(0.92f, 0.85f, 0.72f), 0.15f, new Vector2(2f, 1.5f));
         if (matWood == null) matWood = MakeMat("WoodPlanks", LoadTex("wood_planks"), new Color(0.75f, 0.6f, 0.42f), 0.3f, new Vector2(1f, 1f));
         if (matRoof == null) matRoof = MakeMat("RoofTiles", LoadTex("roof_tiles"), new Color(0.95f, 0.8f, 0.62f), 0.25f, new Vector2(3f, 2f));
@@ -501,25 +552,22 @@ public class VillageBuilder : MonoBehaviour
         if (matGrass == null) matGrass = MakeMat("FieldGrass", LoadTex("field_grass"), new Color(0.7f, 0.8f, 0.55f), 0.05f, new Vector2(4f, 3f));
 
         // Safety net: re-assign textures by name if a loaded .mat lost its reference.
-        AssignTex(matGround, "ground_mud", new Vector2(14f, 14f));
+        AssignTex(matGround, "ground_mud", new Vector2(5f, 5f));
         AssignTex(matPlaster, "wall_plaster", new Vector2(2f, 1.5f));
         AssignTex(matWood, "wood_planks", new Vector2(1f, 1f));
         AssignTex(matRoof, "roof_tiles", new Vector2(3f, 2f));
         AssignTex(matStone, "stone_wall", new Vector2(2f, 1f));
         AssignTex(matGrass, "field_grass", new Vector2(4f, 3f));
 
-        // Resolve the Standard shader once for the flat/emissive materials.
-        standardShader = (matGround != null && matGround.shader != null) ? matGround.shader : Shader.Find("Standard");
+        // Resolve the lit shader once for the flat/emissive materials
+        // (URP Lit under URP, Standard under Built-in — see GetStandardShader).
+        standardShader = GetStandardShader();
         if (standardShader == null)
         {
-            Debug.LogError("[Village] Standard shader NOT found even after .mat loads!");
+            Debug.LogWarning("[Village] Standard shader NOT found even after .mat loads!");
         }
 
-        matLeaf = MakeFlat("Leaves", new Color(0.10f, 0.22f, 0.08f), 0.05f);
-        matLeaf2 = MakeFlat("Leaves2", new Color(0.13f, 0.28f, 0.09f), 0.05f);
-        matLeaf3 = MakeFlat("Leaves3", new Color(0.07f, 0.17f, 0.06f), 0.05f);
         matPlaster2 = MakeMat("WallPlaster2", LoadTex("wall_plaster"), new Color(0.85f, 0.76f, 0.62f), 0.15f, new Vector2(2f, 1.5f));
-        matTrunk = MakeFlat("Trunk", new Color(0.16f, 0.10f, 0.06f), 0.1f);
         matDark = MakeFlat("MonsterDark", new Color(0.02f, 0.02f, 0.025f), 0.0f);
         matGlass = MakeFlat("WindowGlass", new Color(0.03f, 0.04f, 0.07f), 0.6f);
         matSkin = MakeFlat("Skin", new Color(0.45f, 0.30f, 0.20f), 0.4f);
@@ -534,10 +582,23 @@ public class VillageBuilder : MonoBehaviour
         // (temple roof), dry mud (dirt paths), cobble (chowk paving).
         // LoadTex warns and returns null if a texture is missing, so a
         // missing texture leaves a flat colour instead of killing the build.
-        matBrick = MakeMat("Brick", LoadTex("brick_4_diff_1k"), Color.white, 0.1f, new Vector2(2f, 1f));
-        matThatch = MakeMat("Thatch", LoadTex("thatch_roof_angled_diff_1k"), new Color(0.9f, 0.85f, 0.7f), 0.05f, new Vector2(2f, 2f));
-        matMudDry = MakeMat("MudDry", LoadTex("brown_mud_dry_diff_1k"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(2f, 2f));
-        matCobble = MakeMat("Cobble", LoadTex("cobblestone_floor_04_diff_1k"), new Color(0.85f, 0.84f, 0.8f), 0.1f, new Vector2(4f, 4f));
+        // Cheap-wins 2026-11-07: each material now also gets its matching
+        // normal / metallic-smoothness / AO map (same tiling, exact match
+        // — the maps belong to these very diffuse textures).
+        matBrick = MakeMat("Brick", LoadTex("brick_4_diff_1k"), Color.white, 0.1f, new Vector2(2f, 1f),
+            LoadTex("brick_4_nor_gl_1k"), LoadTex("brick_4_metal_smooth_1k"), LoadTex("brick_4_ao_1k"));
+        matThatch = MakeMat("Thatch", LoadTex("thatch_roof_angled_diff_1k"), new Color(0.9f, 0.85f, 0.7f), 0.05f, new Vector2(2f, 2f),
+            LoadTex("thatch_roof_angled_nor_gl_1k"), LoadTex("thatch_roof_angled_metal_smooth_1k"), LoadTex("thatch_roof_angled_ao_1k"));
+        matMudDry = MakeMat("MudDry", LoadTex("brown_mud_dry_diff_1k"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(2f, 2f),
+            LoadTex("brown_mud_dry_nor_gl_1k"), LoadTex("brown_mud_dry_metal_smooth_1k"), LoadTex("brown_mud_dry_ao_1k"));
+        matCobble = MakeMat("Cobble", LoadTex("cobblestone_floor_04_diff_1k"), new Color(0.85f, 0.84f, 0.8f), 0.1f, new Vector2(4f, 4f),
+            LoadTex("cobblestone_floor_04_nor_gl_1k"), LoadTex("cobblestone_floor_04_metal_smooth_1k"), LoadTex("cobblestone_floor_04_ao_1k"));
+        // Ground variation: leaf litter + withered grass patches scattered
+        // over the village ground (real photo textures, not flat colour).
+        matLeaves = MakeMat("Leaves", LoadTex("brown_mud_leaves_01_diff_1k"), Color.white, 0.05f, new Vector2(1f, 1f),
+            LoadTex("brown_mud_leaves_01_nor_gl_1k"), LoadTex("brown_mud_leaves_01_metal_smooth_1k"), LoadTex("brown_mud_leaves_01_ao_1k"));
+        matWitheredGrass = MakeMat("WitheredGrass", LoadTex("withered_grass_diff_1k"), Color.white, 0.05f, new Vector2(1f, 1f),
+            LoadTex("withered_grass_nor_gl_1k"), LoadTex("withered_grass_metal_smooth_1k"), LoadTex("withered_grass_ao_1k"));
     }
 
     // Transparent flat material (ground shadow blobs, dirt patches).
@@ -546,7 +607,7 @@ public class VillageBuilder : MonoBehaviour
         Shader s = GetStandardShader();
         if (s == null)
         {
-            Debug.LogError("[Village] Standard shader not available for " + name);
+            Debug.LogWarning("[Village] Standard shader not available for " + name);
             return null;
         }
         Material m = new Material(s);
@@ -559,9 +620,14 @@ public class VillageBuilder : MonoBehaviour
         m.DisableKeyword("_ALPHATEST_ON");
         m.EnableKeyword("_ALPHABLEND_ON");
         m.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        // URP Lit transparency (ignored by Standard): surface = Transparent, blend = Alpha.
+        m.SetFloat("_Surface", 1f);
+        m.SetFloat("_Blend", 0f);
+        m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
         m.renderQueue = 3000;
         m.SetFloat("_Metallic", 0f);
         m.SetFloat("_Glossiness", 0f);
+        m.SetFloat("_Smoothness", 0f);
         return m;
     }
 
@@ -659,6 +725,12 @@ public class VillageBuilder : MonoBehaviour
             m.mainTexture = MakeRadialGlowTexture();
             m.color = color;
             m.SetFloat("_Mode", 3f);
+            // Fix pass: URP/Lit ignores the legacy _Mode float — the
+            // surface type must be set explicitly, or the glow renders
+            // as an OPAQUE quad (a solid rectangle in the sky).
+            m.SetFloat("_Surface", 1f); // 1 = Transparent
+            m.SetFloat("_Blend", 0f);   // 0 = Alpha
+            m.SetFloat("_AlphaClip", 0f);
             m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
             m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             m.SetInt("_ZWrite", 0);
@@ -693,7 +765,67 @@ public class VillageBuilder : MonoBehaviour
             new Vector2(1f, 1f),
             new Vector2(0f, 1f)
         };
+        // NOTE: winding left as the original (front face -Z). A flip
+        // to +Z made the MoonGlow halo visible but ALSO turned the
+        // moon disc DARK (the halo quad at the same position interferes
+        // with the disc); the disc is a pale moon only with the
+        // original winding, so the halo stays culled from the south.
         m.triangles = new int[] { 0, 2, 1, 0, 3, 2 };
+        m.RecalculateNormals();
+        return m;
+    }
+
+    // Crossed-plane wheat plant (fix pass 2026-11-08): two quads at
+    // 90 degrees (X-shape) so the plant reads from every angle. The
+    // wheat_plant texture is an RGBA cutout (stalk + grain head).
+    private Mesh cropPlantMesh;
+    private Material cropPlantMat;
+
+    private Material MakeCropPlantMaterial()
+    {
+        Texture2D tex = Tex("wheat_plant");
+        if (tex == null) return null;
+        Shader lit = Shader.Find("Universal Render Pipeline/Lit");
+        if (lit == null) lit = GetStandardShader();
+        if (lit == null) return null;
+        Material m = new Material(lit);
+        m.name = "CropWheat";
+        m.mainTexture = tex;
+        m.color = Color.white;
+        m.SetFloat("_Metallic", 0f);
+        m.SetFloat("_Smoothness", 0.4f);
+        // Alpha cutout (opaque surface + clip): the texture's alpha
+        // channel cuts the quad to the plant silhouette.
+        m.SetFloat("_Surface", 0f);
+        m.SetFloat("_AlphaClip", 1f);
+        m.SetFloat("_Cutoff", 0.4f);
+        m.EnableKeyword("_ALPHATEST_ON");
+        // Double-sided so the X reads from every angle.
+        m.SetInt("_Cull", 0);
+        m.renderQueue = 2450;
+        return m;
+    }
+
+    private Mesh BuildCropPlantMesh()
+    {
+        Mesh m = new Mesh();
+        m.name = "CropPlantX";
+        float w = 0.35f, h = 0.9f;
+        m.vertices = new Vector3[]
+        {
+            new Vector3(-w, 0f, 0f), new Vector3(w, 0f, 0f),
+            new Vector3(w, h, 0f), new Vector3(-w, h, 0f),
+            new Vector3(0f, 0f, -w), new Vector3(0f, 0f, w),
+            new Vector3(0f, h, w), new Vector3(0f, h, -w)
+        };
+        m.uv = new Vector2[]
+        {
+            new Vector2(0f, 0f), new Vector2(1f, 0f),
+            new Vector2(1f, 1f), new Vector2(0f, 1f),
+            new Vector2(0f, 0f), new Vector2(1f, 0f),
+            new Vector2(1f, 1f), new Vector2(0f, 1f)
+        };
+        m.triangles = new int[] { 0, 2, 1, 0, 3, 2, 4, 6, 5, 4, 7, 6 };
         m.RecalculateNormals();
         return m;
     }
@@ -715,14 +847,60 @@ public class VillageBuilder : MonoBehaviour
 
         // Dirt path patches along the main lane (worn ground, darker mud).
         // Phase 4: real dry-mud texture when available, flat colour fallback.
+        // Lighting pass 2026-11-07: the old lane read as FLAT TILES — 6
+        // identical boxes in a perfect line. Now each patch varies in
+        // width/length, staggers sideways, rotates a few degrees and
+        // alternates mud/ground material, so the lane reads as a worn
+        // track, not paving.
         Material dirt = (matMudDry != null)
             ? matMudDry
             : MakeFlat("DirtPath", new Color(0.45f, 0.35f, 0.24f), 0.05f);
+        Material dirtAlt = (matGround != null) ? matGround : dirt;
         for (int i = 0; i < 6; i++)
         {
             float z = -10f + i * 4f;
-            GameObject patch = Box("DirtPath", new Vector3(0f, 0.03f, z), new Vector3(2.4f, 0.04f, 3.4f), dirt, villageRoot);
+            float w = 2.4f + ((i % 3) - 1) * 0.35f;
+            float l = 3.4f + ((i % 2) * 0.5f);
+            float x = ((i % 3) - 1) * 0.3f;
+            GameObject patch = Box("DirtPath", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), (i % 2 == 0) ? dirt : dirtAlt, villageRoot);
+            patch.transform.rotation = Quaternion.Euler(0f, ((i * 7) % 13) - 6f, 0f);
             Destroy(patch.GetComponent<Collider>());
+        }
+
+        // Fix-push P2-17: east-west dirt patches across the lane at z ~ 7
+        // (same dirt material / patch style as the north-south lane above).
+        // Lighting pass: same variation treatment as the main lane.
+        for (int i = 0; i < 5; i++)
+        {
+            float x = -8f + i * 4f;
+            float w = 3.4f + ((i % 2) * 0.5f);
+            float l = 2.4f + ((i % 3) - 1) * 0.35f;
+            float z = 7f + ((i % 3) - 1) * 0.3f;
+            GameObject patchEW = Box("DirtPathEW", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), (i % 2 == 0) ? dirt : dirtAlt, villageRoot);
+            patchEW.transform.rotation = Quaternion.Euler(0f, ((i * 11) % 13) - 6f, 0f);
+            Destroy(patchEW.GetComponent<Collider>());
+        }
+
+        // Lighting pass 2026-11-07 — PUDDLES (the reference image): dark
+        // glossy discs on the chowk and lane that catch the warm lamp
+        // light and the moon — wet mud after rain. Very high smoothness
+        // (0.95) + dark blue-grey colour; the reflection probe + lamp
+        // specular make them glint instead of reading as flat paint.
+        // y=0.045 sits above the chowk (0.02) and lane patches (0.03).
+        Material puddleMat = MakeFlat("Puddle", new Color(0.07f, 0.08f, 0.11f), 0.95f);
+        Vector3[] puddleSpots = new Vector3[]
+        {
+            new Vector3(1.5f, 0.045f, 2.5f), new Vector3(3.6f, 0.045f, 0.4f),
+            new Vector3(0f, 0.045f, -4f), new Vector3(-1.6f, 0.045f, 5f),
+            new Vector3(4.2f, 0.045f, 8.2f),
+        };
+        for (int i = 0; i < puddleSpots.Length; i++)
+        {
+            float r = 0.9f + (i % 3) * 0.35f;
+            GameObject puddle = Cylinder("Puddle", puddleSpots[i],
+                new Vector3(r, 0.02f, r * (0.7f + (i % 2) * 0.25f)), puddleMat, villageRoot);
+            puddle.transform.rotation = Quaternion.Euler(0f, (i * 53) % 180f, 0f);
+            Destroy(puddle.GetComponent<Collider>());
         }
 
         // Phase 4: cobbled chowk circle around the village centre.
@@ -732,15 +910,126 @@ public class VillageBuilder : MonoBehaviour
             Destroy(chowk.GetComponent<Collider>());
         }
 
-        // Grass tufts near the field edge.
-        Material tuftMat = MakeFlat("GrassTuft", new Color(0.18f, 0.32f, 0.10f), 0.05f);
+        // Grass patches near the field edge — FLAT textured patches, not
+        // the old vertical green boxes (they read as green dice).
+        // Withered-grass photo texture, varied rotation/scale.
         for (int i = 0; i < 16; i++)
         {
             float x = 4f + (i % 8) * 1.4f;
             float z = 12.5f + (i / 8) * 1.2f + ((i % 3) * 0.4f);
-            GameObject tuft = Box("GrassTuft", new Vector3(x, 0.2f, z), new Vector3(0.3f, 0.4f, 0.3f), tuftMat, villageRoot);
+            Material gm = (matWitheredGrass != null) ? matWitheredGrass : matGrass;
+            GameObject tuft = Box("GrassPatch", new Vector3(x, 0.06f, z), new Vector3(1.1f, 0.04f, 1.1f), gm, villageRoot);
             tuft.transform.rotation = Quaternion.Euler(0f, i * 23f, 0f);
             Destroy(tuft.GetComponent<Collider>());
+        }
+
+        // Scattered ground variation across the village: leaf litter,
+        // withered grass and dry-mud patches break up the flat brown.
+        // Kept outside the chowk disc (r ~5) and off the dirt lanes so
+        // nothing z-fights the path/chowk patches (these sit at y=0.06,
+        // above the lane patches at 0.03 and the chowk at 0.02).
+        Vector3[] patchSpots = new Vector3[]
+        {
+            new Vector3(-12f, 0f, -6f), new Vector3(12f, 0f, -10f),
+            new Vector3(-14f, 0f, 4f), new Vector3(14f, 0f, 6f),
+            new Vector3(-6f, 0f, -14f), new Vector3(8f, 0f, 14f),
+            new Vector3(-10f, 0f, 12f), new Vector3(16f, 0f, -6f),
+            new Vector3(-16f, 0f, -10f), new Vector3(10f, 0f, -14f),
+            new Vector3(-4f, 0f, 16f), new Vector3(18f, 0f, 10f),
+            // Second ring — the big empty stretches (north lane sides,
+            // east/west edges, south field edge).
+            new Vector3(-8f, 0f, -12f), new Vector3(8f, 0f, -12f),
+            new Vector3(-15f, 0f, -4f), new Vector3(15f, 0f, 4f),
+            new Vector3(-10f, 0f, 18f), new Vector3(4f, 0f, 18f),
+            new Vector3(14f, 0f, 16f), new Vector3(18f, 0f, -12f),
+            new Vector3(-18f, 0f, 8f), new Vector3(6f, 0f, -8f),
+            // Third ring — foreground/south and mid-village bare stretches,
+            // where the main camera looks (kept off the dirt lanes z=7 / x=0
+            // and outside the chowk disc r~5).
+            new Vector3(-4f, 0f, 12f), new Vector3(4f, 0f, 12f),
+            new Vector3(-10f, 0f, 14f), new Vector3(10f, 0f, 14f),
+            new Vector3(-14f, 0f, -2f), new Vector3(14f, 0f, -2f),
+            new Vector3(-8f, 0f, -14f), new Vector3(8f, 0f, -14f),
+            new Vector3(12f, 0f, 10f), new Vector3(-12f, 0f, 10f),
+            new Vector3(2f, 0f, 18f), new Vector3(18f, 0f, -4f),
+        };
+        for (int i = 0; i < patchSpots.Length; i++)
+        {
+            Material pm = (i % 3 == 0 && matLeaves != null) ? matLeaves
+                : (i % 3 == 1 && matWitheredGrass != null) ? matWitheredGrass
+                : (matMudDry != null ? matMudDry : matGround);
+            float s = 2.2f + (i % 4) * 0.5f;
+            GameObject patch = Box("GroundPatch", new Vector3(patchSpots[i].x, 0.06f, patchSpots[i].z),
+                new Vector3(s, 0.04f, s * (0.8f + (i % 3) * 0.15f)), pm, villageRoot);
+            patch.transform.rotation = Quaternion.Euler(0f, (i * 37) % 180f, 0f);
+            Destroy(patch.GetComponent<Collider>());
+        }
+    }
+
+    // Stray-object cleanup (runs after all models load):
+    //  - leaf meshes detached at ground level (e.g. one big leaf lying on
+    //    the dirt path in the 18:50 screenshots). A real canopy leaf never
+    //    sits below ~1 m, so leaf-named renderers whose bounds centre is
+    //    near the ground are disabled.
+    //  - the temple's flat untextured 7x7 m base plate (Object_4): it reads
+    //    as a white slab in front of the temple. The real stepped plinth
+    //    (Object_25) stays.
+    private void CleanupStrays()
+    {
+        if (villageRoot == null) return;
+        int removed = 0;
+        foreach (Renderer r in villageRoot.GetComponentsInChildren<Renderer>(true))
+        {
+            if (r == null || r.gameObject == null) continue;
+            string lname = r.gameObject.name.ToLower();
+            // Leaf litter on the ground: the whole mesh lies flat (max.y
+            // under 0.6 m). A canopy cluster or drooping frond spans metres
+            // vertically and is never caught by this. Matches "leaf",
+            // "leaves" (mango canopy mesh) and "frond".
+            bool isLeaf = lname.Contains("leaf") || lname.Contains("leaves") || lname.Contains("frond");
+            if (isLeaf && r.bounds.max.y < 0.6f)
+            {
+                Debug.Log("[Village] Disabling ground-level leaf mesh: " + r.gameObject.name
+                    + " at " + r.bounds.center.ToString("F2"));
+                r.gameObject.SetActive(false);
+                removed++;
+            }
+            // Detached leaf with a generic Sketchfab name ("Object_N" — no
+            // "leaf" in it): a small FLAT mesh lying on the dirt under a
+            // tree. Canopy clusters and drooping fronds span metres
+            // vertically and trunks are tall, so flat + low + small + under
+            // a Tree only ever matches a stray leaf.
+            if (!isLeaf && r.bounds.max.y < 0.5f && r.bounds.size.y < 0.08f
+                && r.bounds.size.x < 2f && r.bounds.size.z < 2f)
+            {
+                bool underTree = false;
+                for (Transform p = r.transform.parent; p != null; p = p.parent)
+                {
+                    if (p.name.ToLower().Contains("tree")) { underTree = true; break; }
+                }
+                if (underTree)
+                {
+                    Debug.Log("[Village] Disabling detached flat leaf under tree: " + r.gameObject.name
+                        + " at " + r.bounds.center.ToString("F2"));
+                    r.gameObject.SetActive(false);
+                    removed++;
+                }
+            }
+        }
+        if (removed > 0) Debug.Log("[Village] Disabled " + removed + " ground-level leaf mesh(es)");
+
+        GameObject temple = GameObject.Find("Temple");
+        if (temple != null)
+        {
+            foreach (Renderer r in temple.GetComponentsInChildren<Renderer>(true))
+            {
+                if (r == null || r.gameObject == null) continue;
+                if (r.gameObject.name == "Object_4" && r.bounds.size.y < 0.05f)
+                {
+                    Debug.Log("[Village] Disabling temple base plate Object_4 (white slab)");
+                    r.gameObject.SetActive(false);
+                }
+            }
         }
     }
 
@@ -856,6 +1145,15 @@ public class VillageBuilder : MonoBehaviour
             Debug.LogWarning("[Village] Real Nilesh model failed to load — keeping primitive figure");
             yield break;
         }
+        // Play his Mixamo walk/run/idle clips (remapped legacy clips in
+        // Resources/Animations). NileshAnimator CrossFades by movement
+        // speed and falls back to the embedded 'mixamo.com' idle clip
+        // when the remapped clips are missing, so he is never frozen in
+        // the bind (T-)pose. glTFast assigns the embedded clip after
+        // AddComponent, so playAutomatically never fires — the animator
+        // handles the explicit Play(). Paths stay valid: Normalize skips
+        // the ModelRoot wrapper for animated models.
+        player.AddComponent<NileshAnimator>();
         // Remove the primitive fallback figure.
         Transform oldFigure = player.transform.Find("Figure");
         if (oldFigure != null)
@@ -913,11 +1211,20 @@ public class VillageBuilder : MonoBehaviour
         }
 
         // Houses 2-6: one different real model each.
-        yield return BuildRealHouse("House_2", "village_house_for_game_20_lafr.glb",
+        // Follow-up 2026-11-07: Indian House Old (35,565 tris, albedo-only)
+        // replaces the 4,100-tri low-poly box.
+        yield return BuildRealHouse("House_2", "indian_house_old_18_qlsq.glb",
             new Vector3(9f, 0f, 8f), 15f, 5.5f);
-        yield return BuildRealHouse("House_3", "village_hut_house_21_tyn9.glb",
+        // Replacement 2026-11-07: stealth86 Thatched Hut, decimated
+        // 161k -> ~50k tris (full PBR on Material.002). House_4 stays the
+        // old pointed hut until the round-2 hut arrives — every house
+        // must be different.
+        yield return BuildRealHouse("House_3", "thatched_hut_stealth86_50k.glb",
             new Vector3(-9f, 0f, -9f), -10f, 4.5f);
-        yield return BuildRealHouse("House_4", "hut_with_thatched_pointed_roof_22_96py.glb",
+        // Follow-up 2026-11-07: traditional ROUND thatched hut, decimated
+        // 149k -> 50k tris (full PBR). Round silhouette, genuinely different
+        // from House_3's gabled stealth86 hut.
+        yield return BuildRealHouse("House_4", "traditional_round_thatched_hut_50k.glb",
             new Vector3(9f, 0f, -7f), 25f, 5f);
         yield return BuildRealHouse("House_5", "old_village_house_-_indian_game_asset_24_bac7.glb",
             new Vector3(-13f, 0f, 13f), -20f, 5f);
@@ -1131,7 +1438,9 @@ public class VillageBuilder : MonoBehaviour
         // Real stone well (.glb) at the chowk edge (kept clear of the
         // monster's lane path). Normalised by height (the model includes
         // its roof posts, so it is taller than wide).
-        Vector3 wellPos = new Vector3(-4.5f, 0f, -3.5f);
+        // Placement fix 2026-11-07: the well's west rim (x=-5.5) was
+        // tangent to the west fence rail. Now (-4, -3.5): 0.5 m clear.
+        Vector3 wellPos = new Vector3(-4f, 0f, -3.5f);
         GameObject well = null;
         yield return GltfModelLoader.LoadModel(
             "old_well_with_hanging_bucket_2_qm9u.glb", villageRoot, "Well",
@@ -1159,6 +1468,13 @@ public class VillageBuilder : MonoBehaviour
         foodPickup = crate.AddComponent<Pickup>();
         foodPickup.itemName = "Khana";
         foodPickup.bobHeight = 0.12f;
+
+        // Fix-push P2-18b: 3 more pickups, same Pickup system as the food
+        // crate — water by the handpump, medicine inside Nilesh's house,
+        // battery by the chowk lamp.
+        waterPickup = MakePickup("Pickup_Water", new Vector3(5f, 0.3f, 10.2f), "Paani");
+        medicinePickup = MakePickup("Pickup_Medicine", new Vector3(-10.5f, 0.3f, 5f), "Dawai");
+        batteryPickup = MakePickup("Pickup_Battery", new Vector3(1.2f, 0.3f, 2.8f), "Battery");
 
         // Chowk lamp: pole + warm flickering point light + glow.
         Vector3 lampPos = new Vector3(2.5f, 0f, 1.5f);
@@ -1188,67 +1504,73 @@ public class VillageBuilder : MonoBehaviour
         GameObject field = Box("Field", fieldPos + new Vector3(0f, 0.02f, 0f), new Vector3(10f, 0.06f, 6f), matGrass, villageRoot);
         Destroy(field.GetComponent<Collider>());
 
-        // Crop rows: small dark-green tufts.
-        Material cropMat = MakeFlat("Crop", new Color(0.16f, 0.35f, 0.10f), 0.05f);
-        for (int r = 0; r < 4; r++)
+        // Crop rows: TEXTURED crossed-plane wheat (fix pass 2026-11-08).
+        // The box stalks (0.14 m columns + box heads) still read as
+        // primitive columns at night. Each plant is now two crossed
+        // quads (X-shape, 0.7 x 0.9 m) with the wheat_plant cutout
+        // texture — a real stalk + grain head silhouette that reads as
+        // wheat from any angle, in the same 6x14 dense layout.
+        if (cropPlantMat == null) cropPlantMat = MakeCropPlantMaterial();
+        if (cropPlantMesh == null) cropPlantMesh = BuildCropPlantMesh();
+        if (cropPlantMat != null && cropPlantMesh != null)
         {
-            for (int c = 0; c < 9; c++)
+            for (int r = 0; r < 6; r++)
             {
-                Vector3 p = fieldPos + new Vector3(-4f + c * 1.0f, 0.25f, -2.2f + r * 1.4f);
-                Box("Crop", p, new Vector3(0.35f, 0.5f, 0.35f), cropMat, villageRoot);
+                for (int c = 0; c < 14; c++)
+                {
+                    float jx = ((r * 3 + c * 5) % 5 - 2) * 0.06f;
+                    float jz = ((r * 11 + c * 7) % 5 - 2) * 0.06f;
+                    float yaw = (r * 31 + c * 17) % 360;
+                    float s = 0.85f + ((r * 7 + c * 13) % 5) * 0.07f;
+                    Vector3 p = fieldPos + new Vector3(-4.55f + c * 0.7f + jx, 0.02f, -2.2f + r * 0.85f + jz);
+                    GameObject plant = new GameObject("CropPlant");
+                    plant.transform.SetParent(villageRoot, false);
+                    plant.transform.position = p;
+                    plant.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+                    plant.transform.localScale = new Vector3(s, s, s);
+                    MeshFilter mf = plant.AddComponent<MeshFilter>();
+                    mf.sharedMesh = cropPlantMesh;
+                    MeshRenderer mr = plant.AddComponent<MeshRenderer>();
+                    mr.sharedMaterial = cropPlantMat;
+                }
             }
         }
     }
 
-    private void BuildTree(Vector3 pos, float scale)
-    {
-        Transform root = new GameObject("Tree").transform;
-        root.SetParent(villageRoot, false);
-        root.position = pos;
-        // Slight deterministic lean/rotation so trees are not clones.
-        float lean = Mathf.Sin(pos.x * 12.9898f + pos.z * 78.233f) * 4f;
-        root.rotation = Quaternion.Euler(lean * 0.5f, Mathf.Abs(Mathf.Sin(pos.x * 3.7f)) * 180f, lean);
-
-        // Trunk (tapered look: two stacked cylinders).
-        Cylinder("Trunk", pos + new Vector3(0f, 1.1f * scale, 0f), new Vector3(0.35f * scale, 2.2f * scale, 0.35f * scale), matTrunk, root);
-        Cylinder("TrunkTop", pos + new Vector3(0f, 2.1f * scale, 0f), new Vector3(0.22f * scale, 0.6f * scale, 0.22f * scale), matTrunk, root);
-        // Canopy: three overlapping blobs, varied greens — no more single lollipop ball.
-        Sphere("CanopyA", pos + new Vector3(0f, 2.9f * scale, 0f), new Vector3(2.6f * scale, 1.9f * scale, 2.6f * scale), matLeaf, root);
-        Sphere("CanopyB", pos + new Vector3(0.85f * scale, 2.35f * scale, 0.4f * scale), new Vector3(1.6f * scale, 1.15f * scale, 1.6f * scale), matLeaf2, root);
-        Sphere("CanopyC", pos + new Vector3(-0.75f * scale, 2.45f * scale, -0.35f * scale), new Vector3(1.45f * scale, 1.05f * scale, 1.45f * scale), matLeaf3, root);
-        Sphere("CanopyD", pos + new Vector3(0.1f * scale, 3.5f * scale, -0.2f * scale), new Vector3(1.3f * scale, 0.9f * scale, 1.3f * scale), matLeaf2, root);
-        // Ground shadow blob under the tree.
-        if (matShadowBlob != null)
-        {
-            GameObject blob = Cylinder("TreeShadow", pos + new Vector3(0f, 0.03f, 0f), new Vector3(3.2f * scale, 0.02f, 3.2f * scale), matShadowBlob, root);
-            Destroy(blob.GetComponent<Collider>());
-        }
-        Block(pos + new Vector3(0f, 1.1f, 0f), new Vector3(0.6f, 2.2f, 0.6f));
-    }
-
     private System.Collections.IEnumerator BuildJungleAndFencesAsync()
     {
-        // Jungle edge: dark trees ringing the village.
+        // Inner trees: REAL models first — they are also the clone sources
+        // for the jungle-edge ring (clones share meshes/materials, so the
+        // ring costs no extra texture memory).
+        GameObject mango = null, banyan = null, palm = null;
+        yield return LoadRealTree("mango_tree_3_sl11.glb", "Tree_Mango",
+            new Vector3(-16f, 0f, -2f), 6f, GltfModelLoader.ColliderMode.Trunk, g => mango = g);
+        // Replacement 2026-11-07: Chinese Banyan, 111k tris with real
+        // aerial roots (the old 3.2k-tri banyan + its 35 m base disc are gone).
+        yield return LoadRealTree("chinese_banyan_ficus_microcarpa_9_tpa1.glb", "Tree_Banyan",
+            new Vector3(16f, 0f, 2f), 7f, GltfModelLoader.ColliderMode.Trunk, g => banyan = g);
+        // Replacement 2026-11-07: Realistic Palm Tree Free, 27k tris,
+        // single date palm (the old 2.9k-tri cluster rendered black).
+        yield return LoadRealTree("realistic_palm_tree_free_8_k8rm.glb", "Tree_Palm",
+            new Vector3(-4f, 0f, 18f), 5f, GltfModelLoader.ColliderMode.FullBounds, g => palm = g);
+        yield return LoadRealTree("trees_25_wae0.glb", "Tree_Pack",
+            new Vector3(-18f, 0f, -18f), 8f, GltfModelLoader.ColliderMode.FullBounds, null);
+
+        // Jungle edge: REAL tree clones ringing the village. The old
+        // primitive blob trees (BuildTree) are gone — user ordered no
+        // cartoon. Same ring positions as before, sources round-robin.
+        GameObject[] ringSources = new GameObject[] { mango, banyan, palm };
+        int ringIndex = 0;
         for (int x = -20; x <= 20; x += 4)
         {
-            BuildTree(new Vector3(x, 0f, -21f), 1.1f + (Mathf.Abs(x) % 3) * 0.15f);
-            BuildTree(new Vector3(x, 0f, 21f), 1.0f + (Mathf.Abs(x) % 2) * 0.2f);
+            CloneRingTree(ringSources, ringIndex++, new Vector3(x, 0f, -21f));
+            CloneRingTree(ringSources, ringIndex++, new Vector3(x, 0f, 21f));
         }
         for (int z = -16; z <= 16; z += 5)
         {
-            BuildTree(new Vector3(-21f, 0f, z), 1.2f);
-            BuildTree(new Vector3(21f, 0f, z), 1.0f + (Mathf.Abs(z) % 3) * 0.15f);
+            CloneRingTree(ringSources, ringIndex++, new Vector3(-21f, 0f, z));
+            CloneRingTree(ringSources, ringIndex++, new Vector3(21f, 0f, z));
         }
-        // Inner trees: REAL models (mango, banyan, palm + a tree cluster).
-        // Normalised by height — trees are taller than wide.
-        yield return LoadRealTree("mango_tree_3_sl11.glb", "Tree_Mango",
-            new Vector3(-16f, 0f, -2f), 6f, GltfModelLoader.ColliderMode.Trunk);
-        yield return LoadRealTree("banyan_tree_001_26_fyf3.glb", "Tree_Banyan",
-            new Vector3(16f, 0f, 2f), 7f, GltfModelLoader.ColliderMode.Trunk);
-        yield return LoadRealTree("palm_trees_27_x7l3.glb", "Tree_Palm",
-            new Vector3(-4f, 0f, 18f), 5f, GltfModelLoader.ColliderMode.FullBounds);
-        yield return LoadRealTree("trees_25_wae0.glb", "Tree_Pack",
-            new Vector3(-18f, 0f, -18f), 8f, GltfModelLoader.ColliderMode.FullBounds);
 
         // Wood fences along the main lane: posts + two rails per segment.
         for (int i = 0; i < 5; i++)
@@ -1263,7 +1585,7 @@ public class VillageBuilder : MonoBehaviour
 
     private System.Collections.IEnumerator LoadRealTree(
         string file, string goName, Vector3 pos, float height,
-        GltfModelLoader.ColliderMode colMode)
+        GltfModelLoader.ColliderMode colMode, System.Action<GameObject> onDone)
     {
         GameObject t = null;
         yield return GltfModelLoader.LoadModel(
@@ -1271,8 +1593,38 @@ public class VillageBuilder : MonoBehaviour
             GltfModelLoader.NormalizeMode.ByHeight, colMode, g => t = g);
         if (t == null)
         {
-            BuildTree(pos, 1.1f);
+            // Real tree failed to load — leave the spot empty. Never fall
+            // back to a primitive blob tree (user ordered no cartoon).
+            Debug.LogWarning("[Village] Real tree failed to load, skipped: " + file);
+            if (onDone != null) onDone(null);
+            yield break;
         }
+        // (Old banyan disc workaround REMOVED 2026-11-07: the old Sketchfab
+        // banyan carried a 35 m base disc "pDisc1" that had to be hidden.
+        // The replacement Chinese Banyan has real aerial roots and no
+        // base disc, so there is nothing to hide.)
+        if (onDone != null) onDone(t);
+    }
+
+    // Clone one of the loaded real trees onto the jungle-edge ring.
+    // Clones share the source's meshes/materials (no extra texture
+    // memory). Deterministic yaw + scale jitter so clones are not clones.
+    private void CloneRingTree(GameObject[] sources, int index, Vector3 pos)
+    {
+        GameObject src = null;
+        for (int k = 0; k < sources.Length; k++)
+        {
+            GameObject cand = sources[(index + k) % sources.Length];
+            if (cand != null) { src = cand; break; }
+        }
+        if (src == null) return;
+        GameObject c = Object.Instantiate(src, villageRoot);
+        c.name = src.name + "_Ring";
+        c.transform.position = pos;
+        c.transform.rotation = Quaternion.Euler(0f, (index * 47) % 360, 0f);
+        float s = 0.9f + (index % 3) * 0.12f;
+        c.transform.localScale = src.transform.localScale * s;
+        Block(pos + new Vector3(0f, 1.1f, 0f), new Vector3(0.6f, 2.2f, 0.6f));
     }
 
     private void BuildFenceSegment(Vector3 pos, float length)
@@ -1289,26 +1641,56 @@ public class VillageBuilder : MonoBehaviour
     // that fails to load is simply skipped (decorative — no fallback).
     // NOTE: the charpai .glb is deliberately NOT placed — its file carries
     // a stray 911-unit "bake" plane that would render as a huge flat slab.
+    // Fix-push P0-4: the file was deleted from the project (backed up in
+    // fix-backups/) since nothing referenced it.
     private System.Collections.IEnumerator BuildPropsAsync()
     {
         // Vehicles / big props.
         yield return LoadProp("medieval_wooden_cart_1_jab4.glb", "Cart",
             new Vector3(5.5f, 0f, 3.0f), 0f, 2.2f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
-        yield return LoadProp("an_old_bullock_cart_14_bxqa.glb", "BullockCart",
-            new Vector3(-6f, 0f, -4f), 0f, 2.5f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
-        yield return LoadProp("tractor_12_35hh.glb", "Tractor",
+        // Replacement 2026-11-07: Bullcart, 105k tris — good geometry but
+        // ZERO textures as distributed (confirmed twice). Wood PBR is
+        // applied in code (ApplyWoodPbr) — never used flat-coloured.
+        // Placement fix 2026-11-07: the cart sat at (-6, -4) — ON the
+        // west fence line (x=-5.5, z -13.4 to -1), the rail passing
+        // through it. Now (-7.5, -4): 0.75 m clear of the fence.
+        yield return LoadProp("Bullcart/scene.gltf", "BullockCart",
+            new Vector3(-7.5f, 0f, -4f), 0f, 2.5f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
+            ApplyWoodPbr);
+        // Replacement 2026-11-07: Classic Tractor, 81.7k tris — good
+        // geometry but ZERO textures as distributed. PBR is applied per
+        // material name in code (ApplyTractorPbr) — never flat-coloured.
+        yield return LoadProp("classic_tractor__1__11_scro.glb", "Tractor",
             new Vector3(12f, 0f, 11f), 30f, 3f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
-        // Ancient gate at the south lane entrance — no collider, so the
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
+            ApplyTractorPbr);
+        // Fix-push P2-14: hero's broken-down car (rusty old car, once only,
+        // at the north village edge by the gate — agreed story override of
+        // the low-poly rule).
+        // Replacement 2026-11-07: Hindustan Ambassador, 12.3k tris, FULL
+        // PBR — but CLEAN, no rust. Rust/weathering is applied in code
+        // (WeatherAmbassador: mud detail maps + darkened paint) so it
+        // still reads as the broken-down car from the story.
+        // Placement fix 2026-11-07: the car sat at (5, 18.5) — ON the
+        // east fence line (x=5.5, z 8.7-20.3), the fence rail passing
+        // through it. Now (1, 16): in the south lane by the gate, clear
+        // of the fence (east edge 3.4 < 5.5) and of the gate (z <= 18.6).
+        yield return LoadProp("hindustan_ambassador_4_rh04.glb", "HeroCar",
+            new Vector3(1f, 0f, 16f), 30f, 3f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
+            WeatherAmbassador);
+        // Ancient gate at the north lane entrance — no collider, so the
         // player can walk through the arch.
         yield return LoadProp("ancient_gate_11_4q5m.glb", "Gate",
             new Vector3(0f, 0f, 20.5f), 0f, 4f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         // Small props near the houses.
+        // Placement fix 2026-11-07: the handpump sat at (5, 9), 0.25 m
+        // from the east fence rail. Now (4.5, 9): clear of the fence.
         yield return LoadProp("handpump_3d_39_aah5.glb", "Handpump",
-            new Vector3(5f, 0f, 9f), 0f, 1.3f,
+            new Vector3(4.5f, 0f, 9f), 0f, 1.3f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         yield return LoadProp("indian_terracotta_matka_red_clay_water_pot_40_ris7.glb", "Matka",
             new Vector3(-5f, 0f, 8.5f), 0f, 0.5f,
@@ -1325,69 +1707,243 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("cow_15_u1bj.glb", "Cow",
             new Vector3(8f, 0f, 14f), 0f, 1.8f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
-        yield return LoadProp("goat_17_a8s1.glb", "Goat",
-            new Vector3(12f, 0f, 13f), 0f, 1f,
+        // Replacement 2026-11-07: Boer Goat, 10.4k tris, FULL PBR
+        // (the old 1.5k-tri toy goat is gone).
+        // Placement fix 2026-11-07: the goat stood at (12, 13) — INSIDE
+        // the tractor's footprint (tractor at (12, 11) spans z 8.5-13.5).
+        // Now (13, 15): inside the crop field, clear of the tractor.
+        yield return LoadProp("boer_goat__3d_model_free_7_dr1w.glb", "Goat",
+            new Vector3(13f, 0f, 15f), 0f, 1f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         yield return LoadProp("water_buffalo_18_44fy.glb", "Buffalo",
             new Vector3(6f, 0f, 17f), 0f, 2f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
-        yield return LoadProp("horse_riggedgame_ready_16_2abc.glb", "Horse",
+        // Replacement 2026-11-07: Horse, 70.5k tris, albedo+normal
+        // (the old 2.9k-tri horse rendered black).
+        yield return LoadProp("horse_6_jrh4.glb", "Horse",
             new Vector3(5f, 0f, 6f), 0f, 2.4f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
-        yield return LoadProp("shiba_19_54zt.glb", "Dog",
-            new Vector3(-6f, 0f, 8f), 0f, 0.8f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // Wolf swap 2026-11-08: Dire Wolf Lite (Literock Studios, itch.io),
+        // 9,991 tris, FULL PBR, rigged, 4 anims — replaces the old Shiba
+        // (4,316 tris, 0 PBR; backed up to fix-backups/wolf-swap-20261108/).
+        // Raw length 2.53 m; ByWidth 1.8 m => scale ~0.71, shoulder ~1.0 m.
+        yield return LoadProp("Dire_Wolf_Lite.glb", "Wolf",
+            new Vector3(-6f, 0f, 8f), 0f, 1.8f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
+            g => GltfModelLoader.PlayEmbeddedAnimation(g, "idle_loop"));
     }
 
+    // Fix-push P2-18b: a pickup crate like the food one (Box + Pickup).
+    private Pickup MakePickup(string name, Vector3 pos, string itemName)
+    {
+        GameObject crate = Box(name, pos, new Vector3(0.55f, 0.5f, 0.55f), matWood, villageRoot);
+        Pickup p = crate.AddComponent<Pickup>();
+        p.itemName = itemName;
+        p.bobHeight = 0.12f;
+        return p;
+    }
+
+    // onLoaded (optional): runs after the model is loaded + URP-fixed, so
+    // callers can texture/weather a model that shipped without textures
+    // (bullock cart, tractor) or clean (Ambassador).
     private System.Collections.IEnumerator LoadProp(
         string file, string goName, Vector3 pos, float yaw, float size,
-        GltfModelLoader.NormalizeMode normMode, GltfModelLoader.ColliderMode colMode)
+        GltfModelLoader.NormalizeMode normMode, GltfModelLoader.ColliderMode colMode,
+        System.Action<GameObject> onLoaded = null)
     {
         GameObject p = null;
         yield return GltfModelLoader.LoadModel(
-            file, villageRoot, goName, pos, yaw, size, normMode, colMode, g => p = g);
+            file, villageRoot, goName, pos, yaw, size, normMode, colMode,
+            g => { p = g; if (g != null && onLoaded != null) onLoaded(g); });
         if (p == null)
         {
             Debug.LogWarning("[Village] Prop skipped (load failed): " + file);
         }
     }
 
+    // ---- Post-load texturing helpers (replacement 2026-11-07) ----
+    // Some replacement models shipped WITHOUT textures (bullock cart,
+    // tractor) or clean (Ambassador). Their geometry is good, so PBR is
+    // applied here from the Poly Haven maps cheap-wins downloaded
+    // (Resources/Textures/) — never used flat-coloured.
+
+    private static Texture2D Tex(string name)
+    {
+        Texture2D t = Resources.Load<Texture2D>("Textures/" + name);
+        if (t == null) Debug.LogWarning("[Village] Texture missing: Textures/" + name);
+        return t;
+    }
+
+    // Swaps one glTF material to URP/Lit, preserving its colour and maps.
+    // Shader Graph glTF materials cannot take URP detail maps or
+    // metallic-gloss maps, so weathering/texturing needs URP/Lit.
+    // NOTE: a glTF metallic-roughness texture is NOT a URP metallic-gloss
+    // map (different channel packing) — do not copy it across; use the
+    // metallic/smoothness floats instead.
+    private static Material ToUrpLit(Material m)
+    {
+        if (m == null) return null;
+        Shader lit = Shader.Find("Universal Render Pipeline/Lit");
+        if (lit == null || m.shader == lit) return m;
+        Texture baseTex = m.HasProperty("baseColorTexture") ? m.GetTexture("baseColorTexture") : null;
+        if (baseTex == null) baseTex = m.mainTexture;
+        Color baseCol = m.HasProperty("baseColorFactor") ? m.GetColor("baseColorFactor") : m.color;
+        Texture normTex = m.HasProperty("normalTexture") ? m.GetTexture("normalTexture") : null;
+        Texture occTex = m.HasProperty("occlusionTexture") ? m.GetTexture("occlusionTexture") : null;
+        m.shader = lit;
+        if (baseTex != null) m.SetTexture("_BaseMap", baseTex);
+        m.SetColor("_BaseColor", baseCol);
+        if (normTex != null) m.SetTexture("_BumpMap", normTex);
+        if (occTex != null) m.SetTexture("_OcclusionMap", occTex);
+        m.SetFloat("_Metallic", 0f);
+        m.SetFloat("_Smoothness", 0.5f);
+        m.SetFloat("_Cull", 0f);
+        return m;
+    }
+
+    // Bullock cart: 2 materials, zero textures. Weathered wood PBR from
+    // Poly Haven bark (albedo) + mud normal/metal-smooth (bark's own
+    // normal/roughness maps were never downloaded — mud's fine-grain
+    // normal is the neutral rough-surface substitute).
+    private static void ApplyWoodPbr(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D albedo = Tex("bark_brown_02_diff_1k");
+        Texture2D normal = Tex("brown_mud_dry_nor_gl_1k");
+        Texture2D metalSmooth = Tex("brown_mud_dry_metal_smooth_1k");
+        System.Collections.Generic.HashSet<Material> seen =
+            new System.Collections.Generic.HashSet<Material>();
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null || !seen.Add(m)) continue;
+                ToUrpLit(m);
+                if (albedo != null) m.SetTexture("_BaseMap", albedo);
+                m.SetColor("_BaseColor", Color.white);
+                if (normal != null) m.SetTexture("_BumpMap", normal);
+                m.SetFloat("_BumpScale", 0.6f);
+                if (metalSmooth != null) m.SetTexture("_MetallicGlossMap", metalSmooth);
+            }
+        }
+        Debug.Log("[Village] Bullock cart wood PBR applied to " + seen.Count + " materials");
+    }
+
+    // Tractor: 12 flat-colour materials, zero textures. PBR per material
+    // name — original flat colours are KEPT (they are the right colours),
+    // only surface response is added: a neutral normal map to break the
+    // flat shading + per-part metallic/smoothness.
+    private static void ApplyTractorPbr(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D normal = Tex("brown_mud_dry_nor_gl_1k");
+        System.Collections.Generic.HashSet<Material> seen =
+            new System.Collections.Generic.HashSet<Material>();
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null || !seen.Add(m)) continue;
+                ToUrpLit(m);
+                string name = m.name;
+                float metallic = 0f, smooth = 0.4f, bump = 0.3f;
+                switch (name)
+                {
+                    case "TireBlack":
+                        smooth = 0.12f; bump = 0.8f; break;   // rubber
+                    case "Chrome":
+                        metallic = 1f; smooth = 0.9f; bump = 0f; break;
+                    case "Glass":
+                        smooth = 0.95f; bump = 0f; break;
+                    case "HoodTexture":
+                    case "WheelBlue":
+                    case "WheelWhite":
+                        smooth = 0.55f; bump = 0.25f; break;  // painted metal
+                    case "TurnSignal":
+                        m.SetColor("_EmissionColor", new Color(1f, 0.45f, 0.05f));
+                        m.EnableKeyword("_EMISSION");
+                        smooth = 0.5f; break;
+                    case "StopSignal":
+                        m.SetColor("_EmissionColor", new Color(0.8f, 0.05f, 0.02f));
+                        m.EnableKeyword("_EMISSION");
+                        smooth = 0.5f; break;
+                    default:
+                        smooth = 0.35f; break;                 // black/grey parts
+                }
+                if (normal != null && bump > 0f)
+                {
+                    m.SetTexture("_BumpMap", normal);
+                    m.SetFloat("_BumpScale", bump);
+                }
+                m.SetFloat("_Metallic", metallic);
+                m.SetFloat("_Smoothness", smooth);
+            }
+        }
+        Debug.Log("[Village] Tractor PBR applied to " + seen.Count + " materials");
+    }
+
+    // Ambassador: full PBR but showroom-clean. Weather it with mud detail
+    // maps (grime over the paint) + a darkened, slightly browned paint
+    // colour + matte smoothness, so it reads as the broken-down car.
+    // Lighting pass 2026-11-07: the first weathering went TOO FAR — the
+    // car rendered near-black in the close-up. Now it is lightened
+    // instead of darkened (paint x1.08/1.04/1.0), the mud detail is much
+    // subtler (0.15, was 0.35) and the paint has a little sheen (0.5, was
+    // 0.35) so it catches the gate lantern and reads as a dark-green
+    // vintage car, not a black blob.
+    private static void WeatherAmbassador(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D mudAlbedo = Tex("brown_mud_dry_diff_1k");
+        Texture2D mudNormal = Tex("brown_mud_dry_nor_gl_1k");
+        System.Collections.Generic.HashSet<Material> seen =
+            new System.Collections.Generic.HashSet<Material>();
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null || !seen.Add(m)) continue;
+                ToUrpLit(m);
+                // The Ambassador's dark-green paint lives in its TEXTURE
+                // (blinn1's baseColorFactor is null — the material colour
+                // is white), so the old 1.08x base-colour multiplier did
+                // nothing (attempt-20/22: the car stayed black at night).
+                // Brighten by raising the base colour ABOVE 1 — URP
+                // multiplies the texture by it. blinn1 is the body paint
+                // (+ wheels, same material — the tyres go dark grey,
+                // acceptable); blinn2 is the glass/chrome and is left
+                // alone so the windows stay dark.
+                bool isBody = m.name.StartsWith("blinn1");
+                m.SetFloat("_Smoothness", 0.5f);
+                if (isBody)
+                {
+                    m.SetColor("_BaseColor", new Color(2.2f, 2.2f, 2.2f, 1f));
+                    if (mudAlbedo != null)
+                    {
+                        m.SetTexture("_DetailMap", mudAlbedo);
+                        m.SetFloat("_DetailAlbedoMapScale", 0.05f);
+                        m.EnableKeyword("_DETAIL_MAP");
+                    }
+                    if (mudNormal != null)
+                    {
+                        m.SetTexture("_DetailNormalMap", mudNormal);
+                        m.SetFloat("_DetailNormalMapScale", 0.25f);
+                    }
+                }
+            }
+        }
+        Debug.Log("[Village] Ambassador weathering applied to " + seen.Count + " materials");
+    }
+
     // ------------------------------------------------------------------
     // Phase 4: temple + new real models.
     // ------------------------------------------------------------------
-    // Primitive temple (south of the chowk, facing north): brick walls,
-    // stone plinth, thatch roof. The real shivling .glb is placed inside
-    // it and the pujari .glb stands at its entrance in BuildNewModelsAsync.
-    private void BuildTemple()
-    {
-        Vector3 c = new Vector3(2f, 0f, -17f);
-        Material brick = (matBrick != null) ? matBrick : matPlaster;
-        Material thatch = (matThatch != null) ? matThatch : matRoof;
-        Transform root = new GameObject("Temple").transform;
-        root.SetParent(villageRoot, false);
-        root.position = c;
-
-        Box("Temple_Plinth", c + new Vector3(0f, 0.15f, 0f), new Vector3(5.5f, 0.3f, 5.5f), matStone, root);
-        // Back (south) + side walls; front (north) stays open.
-        Box("Temple_WallBack", c + new Vector3(0f, 1.8f, -2.35f), new Vector3(5f, 3f, 0.3f), brick, root);
-        Box("Temple_WallSideA", c + new Vector3(-2.35f, 1.8f, 0f), new Vector3(0.3f, 3f, 4.7f), brick, root);
-        Box("Temple_WallSideB", c + new Vector3(2.35f, 1.8f, 0f), new Vector3(0.3f, 3f, 4.7f), brick, root);
-        // Front pillars.
-        Box("Temple_PillarA", c + new Vector3(-2.35f, 1.8f, 2.35f), new Vector3(0.4f, 3f, 0.4f), matStone, root);
-        Box("Temple_PillarB", c + new Vector3(2.35f, 1.8f, 2.35f), new Vector3(0.4f, 3f, 0.4f), matStone, root);
-        // Sloped thatch roof: two panels + ridge + finial.
-        GameObject panelA = Box("Temple_RoofA", c + new Vector3(0f, 3.9f, 1.2f), new Vector3(6f, 0.12f, 3.2f), thatch, root);
-        panelA.transform.rotation = Quaternion.Euler(30f, 0f, 0f);
-        GameObject panelB = Box("Temple_RoofB", c + new Vector3(0f, 3.9f, -1.2f), new Vector3(6f, 0.12f, 3.2f), thatch, root);
-        panelB.transform.rotation = Quaternion.Euler(-30f, 0f, 0f);
-        Box("Temple_Ridge", c + new Vector3(0f, 4.55f, 0f), new Vector3(6f, 0.18f, 0.25f), matWood, root);
-        Sphere("Temple_Finial", c + new Vector3(0f, 4.9f, 0f), new Vector3(0.4f, 0.5f, 0.4f), matLampGlass, root);
-        // Collision: back + side walls (front stays open so the player
-        // can walk in to the shivling).
-        Block(c + new Vector3(0f, 1.5f, -2.35f), new Vector3(5f, 3f, 0.5f));
-        Block(c + new Vector3(-2.35f, 1.5f, 0f), new Vector3(0.5f, 3f, 4.7f));
-        Block(c + new Vector3(2.35f, 1.5f, 0f), new Vector3(0.5f, 3f, 4.7f));
-    }
+    // Fix-push P2-14: the temple is the REAL hindu_temple .glb now (loaded
+    // once in BuildNewModelsAsync at the temple spot (2, -17)). The old
+    // primitive temple shell (BuildTemple) was REMOVED — the real model
+    // carries its own walls/roof and gets a FullBounds collider, so the
+    // player cannot walk through it. The shivling stays OUT (defective).
+    // ------------------------------------------------------------------
 
     // Phase 4: every new real model. Each load is independent — one
     // failure is logged and skipped, never fatal. .gltf bundles (soil,
@@ -1395,38 +1951,79 @@ public class VillageBuilder : MonoBehaviour
     // StreamingAssets/Models/ via the same glTFast path as .glb.
     private System.Collections.IEnumerator BuildNewModelsAsync()
     {
+        // Fix-push P2-14: REAL temple (hindu_temple .glb, once only) at the
+        // temple spot (2, -17) — REPLACES the primitive shell (removed
+        // above). NOTE: model yaw is unverified — check the CI screenshot
+        // that the entrance faces north (chowk).
+        yield return LoadProp("hindu_temple_88_62er.glb", "Temple",
+            new Vector3(2f, 0f, -17f), 0f, 7f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         // School landmark (south-west, clear of House_3 and the jungle ring).
         yield return LoadProp("school-building_74_yizq.glb", "School",
             new Vector3(-16.5f, 0f, -14f), 25f, 7f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         // HAVELI (Meshy, free tier) — the big missing landmark, east of
         // the chowk facing it. Set back from the jungle ring so it only
-        // brushes one ring tree.
+        // brushes one ring tree. Fix-push P2-17: moved 1 m west (17 -> 16).
         yield return LoadProp("meshy_haveli_86_hvl.glb", "Haveli",
-            new Vector3(17f, 0f, -3.5f), -90f, 8f,
+            new Vector3(16f, 0f, -3.5f), -90f, 8f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
-        // Shivling INSIDE the temple (once only — the file is 58 MB).
-        // NOTE (Phase 4): the .glb is EXCLUDED from this push — GitHub's
-        // create-blob API rejects it (60 MB, HTTP 422; proven API limit
-        // is between 35 MB pass and 45 MB fail) AND the source file is
-        // defective (5 of 15 embedded textures are zeroed/garbage).
-        // This LoadProp will log + skip gracefully, so the temple is
-        // empty this run; the shivling needs a fresh Fab re-download
-        // and a proper upload path (local clone push / LFS) in a later
-        // push. Do NOT re-add the file to the push list until then.
-        yield return LoadProp("mahadev_shiv_lingum_c4d_71_52qp.glb", "Shivling",
-            new Vector3(2f, 0f, -17f), 0f, 1.0f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
-        // Pujari at the temple entrance, facing the chowk. NOTE: his face
-        // is flat grey with no facial texture — he stands at mid-ground
-        // distance on purpose, never in close-up.
-        yield return LoadProp("pujari-mahant-guru_72_b1y1.glb", "Pujari",
-            new Vector3(2f, 0f, -14.2f), 0f, 1.7f,
+        // Shivling (cheap-wins 2026-11-07): the OLD 58 MB file was
+        // defective (5 of 15 embedded textures zeroed) and is gone for
+        // good — this is the NEW clean Mahadev (5.9 MB, 213k tris,
+        // 1 texture, verified valid glTF v2), a seated Shiva murti.
+        // Placed ON the shrine platform just inside the front (z=-16,
+        // not -17): the shrine's solid interior block spans z -17.8 to
+        // -16.2, so at -17 the murti sat embedded inside solid stone.
+        yield return LoadProp("mahadev_001__1__2_t4b6.glb", "Shivling",
+            new Vector3(2f, 0f, -16f), 0f, 1.0f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        // NANDI (cheap-wins 2026-11-07): user-sent granite Nandi,
+        // decimated 441k -> 150k tris. Placed in the temple courtyard
+        // NORTH of the gateway (z=-12.8), facing the temple (yaw 180):
+        // the temple's own gateway at z=-13.82 carries a giant hanging
+        // bell on the axis that hid the Nandi when it stood between the
+        // gateway and the shrine. Pujari stands to the side so the
+        // Nandi-shivling sightline stays clear.
+        yield return LoadProp("granite_figure_of_a_nandi_bull_3_3z0y.glb", "Nandi",
+            new Vector3(2f, 0f, -12.8f), 180f, 1.2f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        // Pujari at the temple entrance, facing the chowk.
+        // Lighting pass 2026-11-07: yaw 0 -> 180. The close-up proved he
+        // faced NORTH (toward the temple) at yaw 0 — the camera south of
+        // him saw his back. Yaw 180 turns him to face the chowk (+z).
+        // NULL-material note (verified from the .glb, not a defect):
+        // Wolf3D_Teeth is flat white [0.8,0.8,0.8] = teeth (correct, no
+        // texture needed); Material.003 is flat black [0,0,0] = footwear
+        // (correct); Material.001/002 are flat-colour prop cylinders.
+        // The FACE (Material.007) has its skin texture — it renders
+        // skin-toned, verified in the follow-up close-up.
+        // Replacement 2026-11-07: Indian Man In Dhoti, 21.6k tris,
+        // RIGGED (the old 141k-tri priest had a flat grey untextured
+        // face). 5 of his 9 materials have albedo textures; the rest are
+        // flat colours — CHECK the screenshot: if his face renders flat
+        // grey, the replacement has NOT fixed the defect.
+        // Cheap-wins 2026-11-07: moved 1.6 m east (2 -> 3.6) so he no
+        // longer stands on the Nandi-shivling sightline — from the chowk
+        // he was hiding the Nandi behind him (same x, 1 m apart).
+        // (Position NOT changed by this replacement — x stays 3.6.)
+        yield return LoadProp("indian_man_in_dhoti__1__2_kfur.glb", "Pujari",
+            new Vector3(3.6f, 0f, -14.2f), 270f, 1.7f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        // Fix pass 2026-11-08: yaw 180 faced EAST (south close-up
+        // showed his face in profile pointing right) and yaw 90 faced
+        // NORTH (south close-up showed only his back). Yaw 270 faces
+        // SOUTH, toward the chowk, so his textured face is visible
+        // from the village. PujariLight (south of him) now lights
+        // his front.
+        // He is rigged but has NO embedded animation clip — this call is
+        // a no-op unless a clip exists; he stands in his bind pose.
+        GltfModelLoader.PlayEmbeddedAnimations(GameObject.Find("Pujari"));
         // Second villager (rigged indian_man, sunglasses variant) near the handpump.
         yield return LoadProp("indian_man__sunglasses_76_gmed.glb", "Villager_Man",
             new Vector3(6.5f, 0f, 10.5f), -60f, 1.7f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        GltfModelLoader.PlayEmbeddedAnimations(GameObject.Find("Villager_Man"));
         // MEERA — second main character (rigged indian_woman_in_saree,
         // like Nilesh: static pose first, animation retargeting is a later
         // step, never a blocker). Stands on the chowk lane by Nilesh's
@@ -1434,21 +2031,24 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("indian_woman_in_saree_84_8ssr.glb", "Meera",
             new Vector3(0.5f, 0f, 6.5f), 180f, 1.65f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        GltfModelLoader.PlayEmbeddedAnimations(GameObject.Find("Meera"));
         // MUKHIYA (Meshy, free tier) — the old village headman, standing
         // by the chowk near the well.
         yield return LoadProp("meshy_mukhiya_87_mky.glb", "Mukhiya",
             new Vector3(-3.5f, 0f, 2.5f), 45f, 1.7f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
-        // Chickens (user-made on Meshy) — 2-3 max, near houses.
+        // Chickens (user-made on Meshy) — placed ONCE (fix-push P0-4b:
+        // was 3 copies of the same 2.4M-tri file; the file itself is
+        // replaced with a decimated version by another worker).
         yield return LoadProp("chicken_73_eoja.glb", "Chicken_1",
             new Vector3(-6.5f, 0f, 8f), 40f, 0.6f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
-        yield return LoadProp("chicken_73_eoja.glb", "Chicken_2",
-            new Vector3(7f, 0f, 5.5f), -120f, 0.6f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
-        yield return LoadProp("chicken_73_eoja.glb", "Chicken_3",
-            new Vector3(11f, 0f, -4.5f), 200f, 0.6f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        // yield return LoadProp("chicken_73_eoja.glb", "Chicken_2",
+        //     new Vector3(7f, 0f, 5.5f), -120f, 0.6f,
+        //     GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        // yield return LoadProp("chicken_73_eoja.glb", "Chicken_3",
+        //     new Vector3(11f, 0f, -4.5f), 200f, 0.6f,
+        //     GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         // Small props: wicker basket by the well, wooden stand by Nilesh's door.
         yield return LoadProp("historic_miscellaneous_basket_wicker_old_03_xdwjadj_mid_51_y3o8.glb", "Basket",
             new Vector3(-3f, 0f, -1.5f), 30f, 0.7f,
@@ -1457,9 +2057,10 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(-5.5f, 0f, 3.5f), -20f, 1.1f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Ground surfaces: sandstone by the temple lane, soil north of the
-        // chowk, forest floor at the south jungle edge.
+        // chowk, forest floor at the south jungle edge. Sandstone sits
+        // 0.15 m sunk so it reads as rocky ground, not a raised white slab.
         yield return LoadProp("sandstone_rocky_ground_vd3oeic_mid_59_23jb.glb", "SandstoneGround",
-            new Vector3(-2f, 0f, -18f), 0f, 5f,
+            new Vector3(-2f, -0.15f, -18f), 0f, 5f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         yield return LoadProp("SoilGround/xdhhdhl_tier_2.gltf", "SoilGround",
             new Vector3(-4f, 0f, 12f), 0f, 8f,
@@ -1468,8 +2069,34 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(6f, 0f, -18f), 0f, 6f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         // Shamshan (south-east corner): grave stone set + small grave.
+        // Fix-push P2-17: moved 2 m east (17 -> 19 / 14.5 -> 16.5) so the
+        // graves no longer overlap House_6's corner (~0.25 m before).
         yield return LoadProp("grave_stone_collection_64_7j05.glb", "GraveStones",
-            new Vector3(17f, 0f, -18f), 0f, 3.5f,
+            new Vector3(19f, 0f, -18f), 0f, 3.5f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // Fix-push P2-14: shamshan pyre (woodpile) + fire, by the graves.
+        yield return LoadProp("woodpile_game_ready_asset_91_qdgo.glb", "PyreWood",
+            new Vector3(18.5f, 0f, -19.5f), 20f, 1.8f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        yield return LoadProp("small_fire_place_90_23ou.glb", "ShamshanFire",
+            new Vector3(16.8f, 0f, -19.5f), 0f, 1.5f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // Phase B: BHUMIJA SHIKARA (replacement 2026-11-07) — a real
+        // 12th-century Hoysala shrine scan (150k tris, albedo-only) as the
+        // OLD ABANDONED temple at the north-east jungle edge, once only,
+        // far from the chowk and the main hindu temple (2, -17). A place
+        // nobody goes to. (User's FINAL choice after two flips; Old Ruined
+        // Temple stays on disk as backup only — do NOT place it.)
+        yield return LoadProp("Bhumija/scene.gltf", "AngkorTemple",
+            new Vector3(21f, 0f, 12f), -90f, 8f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // Follow-up 2026-11-07: Abandoned hospital building (54,041 tris,
+        // 21 meshes, 11 materials, ALL full PBR) replaces the decimated
+        // kralls clinic (149,968 tris, 724 meshes / 60 materials) — same
+        // spot at the west village edge facing the chowk. 21 vs 724 meshes
+        // is a huge draw-call win.
+        yield return LoadProp("abandoned_hospital_building_20_2516.glb", "Clinic",
+            new Vector3(-18f, 0f, -2f), 90f, 6f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         // Wooden dock/pier at the north village edge (no river mesh yet —
         // it reads as the pier at the water's edge; river comes later).
@@ -1484,14 +2111,13 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(3.2f, 0f, 2.2f), 0f, 0.9f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // Neem substitute (PlantCatalog Realistic HD Chinaberry tree,
-        // CC-BY, 221,798 tris): 2 instances — one south of the chowk,
-        // one on the north lane. Trunk-only colliders like the other
-        // real trees, so the canopy never walls off an area.
+        // CC-BY, 221,798 tris): ONE instance only (cheap-wins 2026-11-07:
+        // was 2 instances = 444k tris; the second one on the north lane
+        // is removed — the tree itself is the best in the project, the
+        // count was the cost). South of the chowk. Trunk-only collider
+        // like the other real trees, so the canopy never walls off an area.
         yield return LoadProp("realistic_hd_chinaberry_tree_1330_83_1wiy.glb", "Tree_Neem1",
             new Vector3(4f, 0f, -10f), 0f, 6f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.Trunk);
-        yield return LoadProp("realistic_hd_chinaberry_tree_1330_83_1wiy.glb", "Tree_Neem2",
-            new Vector3(-3f, 0f, 15.5f), 120f, 6f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.Trunk);
         // FBX props (native Unity import, under Assets/Resources/):
         // fallen pine at the north-west jungle edge, small grave in the shamshan.
@@ -1503,8 +2129,11 @@ public class VillageBuilder : MonoBehaviour
         });
         RunStep("SmallGrave", delegate
         {
+            // SmallGrave FBX is a FLAT slab (raw 1.1 wide x 0.23 thick x 2.2
+            // long) — normalise by WIDTH to a real 2.2 m grave length.
+            // ByHeight (old: 1.2 m tall) scaled it to a 13 m wide slab.
             GameObject grave = InstantiateResourceModel("SmallGrave/SmallGrave", "SmallGrave",
-                new Vector3(14.5f, 0f, -18f), -30f, 1.2f, true);
+                new Vector3(16.5f, 0f, -18f), -30f, 2.2f, false);
             if (grave == null) Debug.LogWarning("[Village] Small grave FBX not placed");
         });
     }
@@ -1586,10 +2215,25 @@ public class VillageBuilder : MonoBehaviour
     private void BuildMoon()
     {
         // Big pale moon low in the sky + soft glow. DayNightCycle fades it in at night.
+        // Lighting pass 2026-11-07: bigger disc (8 m, was 6) + wider glow
+        // (20 m, was 16) — the reference's big full moon is the night's
+        // anchor, and the old moon read as a small dim ball.
+        // Fix pass 2026-11-08: the moon is a bright pale disc with a
+        // wide glow halo. The disc is the original emissive sphere
+        // (which renders as a visible pale disc). Fog is DISABLED on
+        // the disc (_Fog 0): the moon sits 57 m out, and the night
+        // fog was swallowing its emission and turning it into a dark
+        // disc. DayNightCycle.SetMoon drives the disc's emission
+        // colour. (The crater texture could not be made to show in
+        // this headless render — Unlit rendered it black, the quad
+        // invisible — so the disc stays a pale emissive disc; the
+        // texture file moon_surface.png remains in the project.)
         moonMaterial = MakeEmissive("Moon", new Color(0.85f, 0.88f, 0.95f), new Color(0.25f, 0.25f, 0.3f));
-        GameObject moon = Sphere("Moon", new Vector3(-28f, 26f, -42f), new Vector3(6f, 6f, 6f), moonMaterial, villageRoot);
+        moonMaterial.SetFloat("_Fog", 0f);
+        moonMaterial.DisableKeyword("_FOG");
+        GameObject moon = Sphere("Moon", new Vector3(-28f, 26f, -42f), new Vector3(8f, 8f, 8f), moonMaterial, villageRoot);
         Destroy(moon.GetComponent<Collider>());
-        moonGlow = MakeGlowQuad("MoonGlow", new Vector3(-28f, 26f, -42f), 16f, new Color(0.7f, 0.75f, 0.95f, 0.35f));
+        moonGlow = MakeGlowQuad("MoonGlow", new Vector3(-28f, 26f, -42f), 28f, new Color(0.7f, 0.75f, 0.95f, 0.55f));
     }
 
     // ------------------------------------------------------------------
@@ -1655,6 +2299,13 @@ public class VillageBuilder : MonoBehaviour
         gm.monster = knock;
         gm.torch = torch;
         gm.foodPickup = foodPickup;
+        gm.waterPickup = waterPickup;
+        gm.medicinePickup = medicinePickup;
+        gm.batteryPickup = batteryPickup;
+        gm.totalPickups = 4;
+        gm.npcMukhiyaPos = mukhiyaPos;
+        gm.npcMeeraPos = meeraPos;
+        gm.npcPujariPos = pujariPos;
 
         MobileControls ui = gameObject.AddComponent<MobileControls>();
         ui.player = pc;
@@ -1662,12 +2313,56 @@ public class VillageBuilder : MonoBehaviour
         ui.gameManager = gm;
         gm.ui = ui;
 
-        cycle.OnNightStart = delegate { knock.BeginNight(); };
-        cycle.OnDawn = delegate { gm.Survived(); };
+        cycle.OnNightStart = delegate { knock.BeginNight(); AudioManager.StartNightAmbience(); };
+        cycle.OnDawn = delegate { gm.Survived(); AudioManager.StopNightAmbience(); AudioManager.PlayDawnRelief(); };
+    }
+
+    // Follow-up 2026-11-07: the REAL monster — HellDemon Reborn (73,844
+    // tris, rigged, 7 animations, full PBR) replaces the black capsule-man.
+    // Loaded here during the village build so BuildMonster() (sync, called
+    // later during setup) can return it. Horned demon, not hooded — the
+    // user accepted that by downloading it.
+    private System.Collections.IEnumerator BuildMonsterModelAsync()
+    {
+        GameObject demon = null;
+        yield return GltfModelLoader.LoadModel(
+            "helldemon_reborn_16_sr87.glb", villageRoot, "Monster",
+            new Vector3(-2f, 0f, -19f), 0f, 2.3f,
+            GltfModelLoader.NormalizeMode.ByHeight,
+            GltfModelLoader.ColliderMode.None, g => demon = g);
+        if (demon == null)
+        {
+            Debug.LogWarning("[Village] HellDemon failed to load — falling back to capsule monster");
+            yield break;
+        }
+        // Walk loop while it hunts (MonsterKnock moves the transform).
+        GltfModelLoader.PlayEmbeddedAnimation(demon, "WALKING");
+        demon.SetActive(false);
+        monsterModel = demon;
+        // Lighting pass 2026-11-07: the demon rendered as a BLACK
+        // silhouette at the jungle edge — night ambient (0.13) + moonlight
+        // (0.35) never reach it and the chowk lamp is 20 m away. A cool
+        // blue point light just in front of it (moonlight spill) rims its
+        // horns and body so its detail reads instead of a black blob.
+        // Attempt-8 shot proved 1.6 was still too dim to read the demon
+        // at 6 m — raised to 3.0 / range 9.
+        // MonsterLight: attempt-11 proved 3.0 at (-2, 2.8, -17.5) still
+        // leaves the demon a silhouette (dark albedo, ~3.2 m to the
+        // chest). Raised to 6.0 and moved closer/lower (-2, 2.0, -18)
+        // so it hits the chest and face directly (2026-11-07).
+        AddPointLight("MonsterLight", new Vector3(-2f, 2f, -18f),
+            new Color(0.55f, 0.65f, 1.0f), 6.0f, 9f);
     }
 
     private GameObject BuildMonster()
     {
+        // Follow-up 2026-11-07: the real HellDemon model already loaded
+        // (and hidden) by BuildMonsterModelAsync — use it. Fall back to
+        // the capsule-man only if the .glb failed to load.
+        if (monsterModel != null)
+        {
+            return monsterModel;
+        }
         GameObject m = new GameObject("Monster");
         m.transform.SetParent(villageRoot, false);
         m.transform.position = new Vector3(-2f, 0f, -19f);
@@ -1704,6 +2399,64 @@ public class VillageBuilder : MonoBehaviour
         return m;
     }
 
+    // Lighting pass 2026-11-07 — TWO-COLOUR night lighting (the
+    // reference image): warm orange lamp light against cool blue
+    // moonlight. The scene had ONE warm light (the chowk lamp) and cold
+    // moonlight, so most of the village went black at night. Three small
+    // warm point lights — temple entrance, haveli front, gate — give the
+    // landmarks the warm glow the reference shows, and the gate lantern
+    // also lights the Ambassador (which sits in the dark south lane).
+    // Ranges are small (8-9 m) and the count is low (4 new point lights
+    // total incl. the monster light) so the phone's forward renderer
+    // stays within its additional-light budget.
+    private void BuildWarmLights()
+    {
+        // Temple entrance — warm glow on the temple front, Pujari + Nandi.
+        AddPointLight("TempleLantern", new Vector3(2f, 3f, -13.5f),
+            new Color(1f, 0.7f, 0.35f), 1.4f, 9f);
+        // Pujari's FRONT: the temple lantern sits behind him (north), so
+        // his south face falls in shadow. A small warm light south of him
+        // lights his face and the courtyard ground for the front close-up.
+        // PujariLight: attempt-10 proved 0.8 leaves his front unreadable
+        // at 2.2 m — raised to 1.2 / 6 m (2026-11-07).
+        AddPointLight("PujariLight", new Vector3(3.6f, 2.2f, -11.5f),
+            new Color(1f, 0.72f, 0.38f), 1.2f, 6f);
+        // Haveli front (haveli sits at x=16 facing the chowk/west).
+        AddPointLight("HaveliLantern", new Vector3(13.5f, 2.5f, -3.5f),
+            new Color(1f, 0.72f, 0.38f), 1.0f, 8f);
+        // Gate + Ambassador (car at (1, 16), gate at (0, 20.5)). The
+        // lantern sits SOUTH of the car (z=14, not 18): attempt-20
+        // proved a lantern north of the car lights only its far side —
+        // the camera-facing south side stayed black. At z=14 it lights
+        // the car's south side (the side the player/camera sees) and
+        // still reaches the gate (6 m, within its 8 m range).
+        AddPointLight("GateLantern", new Vector3(1f, 2.6f, 14f),
+            new Color(1f, 0.72f, 0.38f), 1.6f, 8f);
+    }
+
+    // Small helper: one warm/cool point light under the village root.
+    // Failures are warnings, never fatal (one bad light must not kill
+    // the village build).
+    private void AddPointLight(string name, Vector3 pos, Color color, float intensity, float range)
+    {
+        try
+        {
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(villageRoot, false);
+            go.transform.position = pos;
+            Light l = go.AddComponent<Light>();
+            l.type = LightType.Point;
+            l.color = color;
+            l.intensity = intensity;
+            l.range = range;
+            Debug.Log("[Village] Light added: " + name + " at " + pos);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Light failed (" + name + "): " + e.Message);
+        }
+    }
+
     private void SetupSceneAmbience()
     {
         // Shadows on for every quality level (Android default was Low = no shadows).
@@ -1724,8 +2477,41 @@ public class VillageBuilder : MonoBehaviour
         RenderSettings.ambientLight = new Color(0.55f, 0.55f, 0.55f);
         if (mainCam != null)
         {
+            // URP skybox: the moonless-HDRI skybox material is assigned to
+            // RenderSettings.skybox (see Assets/Editor/UrpFixSetup.cs) — the
+            // camera must clear to Skybox or the sky never renders.
+            mainCam.clearFlags = CameraClearFlags.Skybox;
             mainCam.backgroundColor = new Color(0.53f, 0.81f, 0.98f);
             mainCam.farClipPlane = 300f;
+        }
+    }
+
+    // URP environment reflection (2026-11-07 URP fix): a single reflection
+    // probe rendered ONCE, after every model is loaded, so metallic/PBR
+    // materials have an environment to reflect. Realtime + ViaScripting
+    // means exactly one cubemap render at village build time (no per-frame
+    // cost on the phone). Renderers already use ReflectionProbeUsage
+    // BlendProbes, so they pick this probe up automatically.
+    private void SetupReflectionProbe()
+    {
+        try
+        {
+            GameObject probeGo = new GameObject("VillageReflectionProbe");
+            probeGo.transform.SetParent(villageRoot, false);
+            probeGo.transform.localPosition = new Vector3(0f, 2.5f, 0f);
+            ReflectionProbe probe = probeGo.AddComponent<ReflectionProbe>();
+            probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
+            probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.ViaScripting;
+            probe.size = new Vector3(55f, 30f, 55f);
+            probe.resolution = 128;
+            probe.nearClipPlane = 0.3f;
+            probe.farClipPlane = 120f;
+            probe.RenderProbe();
+            Debug.Log("[Village] Reflection probe rendered (128 cubemap).");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Reflection probe failed: " + e.Message);
         }
     }
 
@@ -1736,7 +2522,7 @@ public class VillageBuilder : MonoBehaviour
         if (gm == null) yield break;
         gm.ShowSubtitle("Bhairavpur... ye gaon shaam hote hi darwaza band kar leta hai.", 4f);
         yield return new WaitForSeconds(4.2f);
-        gm.ShowSubtitle("Mukhiya: Raat me koi bhi darwaza khatkhataye to kholna mat!", 4f);
+        gm.ShowSubtitle("Raat me koi bhi darwaza khatkhataye to kholna mat, awaaz chahe kisi apne ki hi kyun na ho!", 4f);
         yield return new WaitForSeconds(4.2f);
         gm.SetObjective("Din: Kuaan ke paas se khana uthao, phir ghar ke andar jao.");
     }

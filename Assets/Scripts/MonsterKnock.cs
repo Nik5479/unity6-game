@@ -33,6 +33,11 @@ public class MonsterKnock : MonoBehaviour
         "Awaaz: KHOLO! Main andar aa raha hoon..."
     };
 
+    private bool PlayerOutsideHouse()
+    {
+        return player != null && !GameManager.IsInsidePlayerHouse(player.position);
+    }
+
     public void BeginNight()
     {
         if (monster == null || door == null) return;
@@ -51,6 +56,28 @@ public class MonsterKnock : MonoBehaviour
     {
         if (stage == 0 || monster == null) return;
         t += Time.deltaTime;
+
+        // Fix-push P2-18a: the monster hunts from night start, not only at
+        // knock stage 3 — a player outside the house at night is chased
+        // while it is still waiting (stage 1) or walking to the door (2).
+        if ((stage == 1 || stage == 2) && PlayerOutsideHouse())
+        {
+            if (stage == 1)
+            {
+                monster.gameObject.SetActive(true);
+                monster.position = new Vector3(-2f, 0f, -19f);
+            }
+            chaseMode = true;
+            MonsterOutside = true;
+            stage = 3;
+            t = 0f;
+            knocksDone = 0;
+            nextKnockAt = 1.2f;
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.ShowSubtitle("Wo tumhe dekh raha hai... bhaago!", 3f);
+            }
+        }
 
         if (stage == 1)
         {
@@ -84,12 +111,27 @@ public class MonsterKnock : MonoBehaviour
         else if (stage == 3)
         {
             // If the player left the house, the monster chases instead.
-            if (player != null && Vector3.Distance(Flat(player.position), Flat(playerHouseCenter)) > 7f)
+            // Fix-push P2-18a: same inside-house rule as the dawn check.
+            if (PlayerOutsideHouse())
             {
                 chaseMode = true;
             }
             if (chaseMode)
             {
+                // Fix-push P2-18a: stop chasing a player who got back
+                // inside and locked the door — the monster gives up.
+                if (door != null && door.IsLocked && !PlayerOutsideHouse())
+                {
+                    chaseMode = false;
+                    MonsterOutside = false;
+                    stage = 5;
+                    t = 0f;
+                    if (GameManager.Instance != null)
+                    {
+                        GameManager.Instance.ShowSubtitle("Awaaz: ...main phir aaunga, Nilesh...", 3f);
+                    }
+                    return;
+                }
                 WalkToward(player.position, 3.4f);
                 if (Vector3.Distance(Flat(monster.position), Flat(player.position)) < 1.6f)
                 {
@@ -131,6 +173,7 @@ public class MonsterKnock : MonoBehaviour
             }
             else
             {
+                AudioManager.PlayDoorCreak(door.transform.position);
                 door.ForceOpen();
                 if (camFollow != null)
                 {
@@ -139,6 +182,7 @@ public class MonsterKnock : MonoBehaviour
                 if (GameManager.Instance != null)
                 {
                     GameManager.Instance.GameOver("Darwaza khula tha... wo andar aa gaya.");
+                    AudioManager.PlayGameOverSting();
                 }
                 stage = 0;
                 MonsterOutside = false;
@@ -159,6 +203,8 @@ public class MonsterKnock : MonoBehaviour
 
     private void Knock(int index)
     {
+        AudioManager.PlayKnock(door != null ? door.transform.position : transform.position);
+        AudioManager.PlayWhisperLine(index); // no-op until user records whisper_1/2/3.ogg
         if (door != null)
         {
             door.Shake(0.8f);

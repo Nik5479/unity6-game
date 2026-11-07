@@ -25,6 +25,51 @@ public static class GltfModelLoader
     public enum NormalizeMode { ByWidth, ByHeight }
     public enum ColliderMode { None, FullBounds, Trunk }
 
+    // LIVE IMPORTS — DO NOT DISPOSE. glTFast's GltfImport owns the meshes,
+    // materials and textures of the scene it instantiated: Dispose() destroys
+    // them (GltfImport.Dispose → SafeDestroy(m_Materials/m_Textures/m_Meshes)),
+    // so disposing after a successful load left every .glb renderer with
+    // zero bounds and null materials (2026-11-07: empty village on phone,
+    // only primitives visible). Every successfully loaded import stays in
+    // this list for the whole scene lifetime and is never disposed during
+    // gameplay. Dispose happens ONLY in Cleanup(), on the failure path,
+    // where the holder GameObject is destroyed anyway.
+    private static readonly System.Collections.Generic.List<GltfImport> s_AliveImports
+        = new System.Collections.Generic.List<GltfImport>();
+
+    // URP Unlit shader (cached). glTFast's Shader Graph "glTF-unlit" renders
+    // pure black under URP (see the fix below) — those materials are swapped
+    // to the built-in URP Unlit shader instead.
+    private static Shader s_UrpUnlitShader;
+    private static bool s_UrpUnlitQueried;
+
+    private static Shader GetUrpUnlitShader()
+    {
+        if (!s_UrpUnlitQueried)
+        {
+            s_UrpUnlitShader = Shader.Find("Universal Render Pipeline/Unlit");
+            s_UrpUnlitQueried = true;
+            if (s_UrpUnlitShader == null)
+                Debug.LogWarning("[Gltf] URP Unlit shader not found — glTF unlit materials keep the Shader Graph shader.");
+        }
+        return s_UrpUnlitShader;
+    }
+
+    // URP Lit shader (cached) — for black-specular spec-gloss materials.
+    private static Shader s_UrpLitShader;
+    private static bool s_UrpLitQueried;
+
+    private static Shader GetUrpLitShader()
+    {
+        if (!s_UrpLitQueried)
+        {
+            s_UrpLitShader = Shader.Find("Universal Render Pipeline/Lit");
+            s_UrpLitQueried = true;
+            if (s_UrpLitShader == null)
+                Debug.LogWarning("[Gltf] URP Lit shader not found — black-specular spec-gloss materials keep the Shader Graph shader.");
+        }
+        return s_UrpLitShader;
+    }
     // Loads one model. onDone(holder) — holder is null on failure.
     // Never throws. The load is sequential per call; callers yield on it.
     public static IEnumerator LoadModel(
@@ -51,12 +96,20 @@ public static class GltfModelLoader
             else
             {
                 // Editor / standalone: plain file on disk.
-                loadTask = gltf.LoadFile(fullPath);
+                // Pass the file's own absolute URI as the base URI: .gltf
+                // bundles reference their .bin + textures by RELATIVE URIs
+                // (e.g. "xdhhdhl_tier_2.bin", "Textures/T_...png"), and
+                // without a base URI glTFast cannot resolve them — every
+                // .gltf load failed with "URI must be absolute" (2026-11-07:
+                // soil, forest floor, 2 lanterns all missing). For .glb the
+                // base URI is ignored (resources are embedded), so passing
+                // it for every file is safe.
+                loadTask = gltf.LoadFile(fullPath, new System.Uri(fullPath));
             }
         }
         catch (System.Exception e)
         {
-            Debug.LogError("[Gltf] Load start failed: " + fileName + " — " + e.Message);
+            Debug.LogWarning("[Gltf] Load start failed: " + fileName + " — " + e.Message);
             Cleanup(gltf, holder);
             if (onDone != null) onDone(null);
             yield break;
@@ -67,7 +120,7 @@ public static class GltfModelLoader
         {
             string why = (loadTask.Exception != null)
                 ? loadTask.Exception.GetBaseException().Message : "Load returned false";
-            Debug.LogError("[Gltf] Load failed: " + fileName + " — " + why);
+            Debug.LogWarning("[Gltf] Load failed: " + fileName + " — " + why);
             Cleanup(gltf, holder);
             if (onDone != null) onDone(null);
             yield break;
@@ -80,7 +133,7 @@ public static class GltfModelLoader
         }
         catch (System.Exception e)
         {
-            Debug.LogError("[Gltf] Instantiate start failed: " + fileName + " — " + e.Message);
+            Debug.LogWarning("[Gltf] Instantiate start failed: " + fileName + " — " + e.Message);
             Cleanup(gltf, holder);
             if (onDone != null) onDone(null);
             yield break;
@@ -89,7 +142,7 @@ public static class GltfModelLoader
         yield return new WaitUntil(() => instTask.IsCompleted);
         if (instTask.IsFaulted || instTask.IsCanceled || !instTask.Result)
         {
-            Debug.LogError("[Gltf] Instantiate failed: " + fileName);
+            Debug.LogWarning("[Gltf] Instantiate failed: " + fileName);
             Cleanup(gltf, holder);
             if (onDone != null) onDone(null);
             yield break;
@@ -103,6 +156,108 @@ public static class GltfModelLoader
         {
             Debug.LogWarning("[Gltf] Normalize failed (keeping original size): "
                 + fileName + " — " + e.Message);
+        }
+
+        // URP has no skybox / reflection probe in this scene, so any glTF
+        // material whose metallicFactor defaulted to 1.0 (glTF spec default
+        // when the property is absent — most Sketchfab exports) renders
+        // pure black: a metal surface with nothing to reflect. A village
+        // has nothing chrome, so force every imported material dielectric.
+        // NOTE (2026-11-07 URP fix): the old code set "_Metallic" — that
+        // property does NOT exist on glTFast's Shader Graph materials, so
+        // the fix silently did nothing. The real property is
+        // "metallicFactor" (glTFast MaterialProperty.Metallic). The thatched
+        // hut's metallic-roughness texture has a blue (metallic) mean of
+        // 0.61, so its roof rendered black. Set metallicFactor to 0 here.
+        // ALSO: glTFast's Shader Graph "glTF-unlit" renders pure black
+        // under URP (horse/palms/dog: mid-tone base textures, white color,
+        // yet black on screen). Swap those materials to the built-in
+        // "Universal Render Pipeline/Unlit" shader, copying base map +
+        // color and preserving the transparent/opaque render setup.
+        try
+        {
+            foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+            {
+                foreach (Material m in r.sharedMaterials)
+                {
+                    if (m == null) continue;
+                    if (m.HasProperty("_Metallic"))
+                        m.SetFloat("_Metallic", 0f);
+                    if (m.HasProperty("metallicFactor"))
+                        m.SetFloat("metallicFactor", 0f);
+                    if (m.shader != null && m.shader.name == "Shader Graphs/glTF-unlit")
+                    {
+                        Shader unlit = GetUrpUnlitShader();
+                        if (unlit != null)
+                        {
+                            Texture baseTex = m.HasProperty("baseColorTexture")
+                                ? m.GetTexture("baseColorTexture") : null;
+                            Color baseCol = m.HasProperty("baseColorFactor")
+                                ? m.GetColor("baseColorFactor") : Color.white;
+                            bool transparent = m.renderQueue >= 3000;
+                            m.shader = unlit;
+                            if (baseTex != null) m.SetTexture("_BaseMap", baseTex);
+                            m.SetColor("_BaseColor", baseCol);
+                            m.SetFloat("_Cull", 0f); // double-sided (palm leaves are single-sided quads)
+                            m.SetOverrideTag("RenderType", transparent ? "Transparent" : "Opaque");
+                            if (transparent)
+                            {
+                                m.SetFloat("_Surface", 1f);
+                                m.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                                m.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                                m.SetFloat("_ZWrite", 0f);
+                                m.SetFloat("_AlphaClip", 0f);
+                                m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                                m.DisableKeyword("_ALPHATEST_ON");
+                            }
+                            else
+                            {
+                                m.SetFloat("_Surface", 0f);
+                                m.SetFloat("_ZWrite", 1f);
+                                m.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                                m.DisableKeyword("_ALPHATEST_ON");
+                            }
+                        }
+                    }
+                    if (m.shader != null && m.shader.name == "Shader Graphs/glTF-pbrSpecularGlossiness")
+                    {
+                        // Spec-gloss materials whose specularFactor is ~black
+                        // render pure black under URP (the Shader Graph's
+                        // spec-gloss path ties visible brightness to the
+                        // specular colour — the pointed thatch hut, specular
+                        // [0,0,0], renders as a black pyramid, while trees
+                        // with specular [1,1,1] render fine). Convert the
+                        // black-specular ones to URP Lit with the equivalent
+                        // PBR setup (diffuse map+colour, metallic 0,
+                        // smoothness = glossiness, spec colour = specular).
+                        Vector4 spec = m.HasProperty("specularFactor")
+                            ? m.GetVector("specularFactor") : new Vector4(1f, 1f, 1f, 1f);
+                        float specMax = Mathf.Max(Mathf.Max(spec.x, spec.y), spec.z);
+                        if (specMax < 0.05f)
+                        {
+                            Shader lit = GetUrpLitShader();
+                            if (lit != null)
+                            {
+                                Texture diffTex = m.mainTexture;
+                                Color diffCol = m.color;
+                                float gloss = m.HasProperty("glossinessFactor")
+                                    ? m.GetFloat("glossinessFactor") : 1f;
+                                m.shader = lit;
+                                if (diffTex != null) m.SetTexture("_BaseMap", diffTex);
+                                m.SetColor("_BaseColor", diffCol);
+                                m.SetFloat("_Metallic", 0f);
+                                m.SetFloat("_Smoothness", Mathf.Clamp01(gloss));
+                                m.SetColor("_SpecColor", new Color(spec.x, spec.y, spec.z, 1f));
+                                m.SetFloat("_Cull", 0f); // double-sided (the thatch hut is)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Gltf] Metallic fix failed: " + fileName + " — " + e.Message);
         }
 
         holder.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
@@ -119,9 +274,86 @@ public static class GltfModelLoader
             }
         }
 
-        gltf.Dispose();
+        // KEEP the import alive: the instantiated meshes/materials/textures
+        // belong to this GltfImport — disposing it would destroy them.
+        // (See s_AliveImports; GltfImport has no finalizer, but the list
+        // makes the lifetime explicit and protects against future GC/finalizer
+        // changes in the package.)
+        s_AliveImports.Add(gltf);
         Debug.Log("[Gltf] Loaded: " + fileName + " as " + goName);
         if (onDone != null) onDone(holder);
+    }
+
+    // Starts any embedded glTF animations under a loaded model (legacy
+    // Animation clips created by glTFast). glTFast assigns the clip AFTER
+    // AddComponent<Animation>, so playAutomatically never fires — an
+    // explicit Play() is required, or the model stays frozen in its bind
+    // (T-)pose. Only call for characters (Nilesh, Meera, Villager_Man):
+    // props with long clips (e.g. the horse's 60 s clip) stay static.
+    public static void PlayEmbeddedAnimations(GameObject holder)
+    {
+        if (holder == null) return;
+        foreach (Animation anim in holder.GetComponentsInChildren<Animation>())
+        {
+            anim.wrapMode = WrapMode.Loop;
+            anim.playAutomatically = true;
+            if (anim.clip != null)
+            {
+                anim.Play();
+                Debug.Log("[Gltf] Playing embedded animation '" + anim.clip.name
+                    + "' (" + anim.clip.length.ToString("F1") + "s) on " + holder.name);
+            }
+            else
+            {
+                Debug.LogWarning("[Gltf] Animation component on " + holder.name + " has no clip");
+            }
+        }
+    }
+
+    // Plays ONE named embedded clip (e.g. the HellDemon's "WALKING" loop)
+    // instead of whatever clip glTFast assigned as anim.clip. Falls back
+    // to anim.clip when no clip matches the name.
+    public static void PlayEmbeddedAnimation(GameObject holder, string clipNameContains)
+    {
+        if (holder == null) return;
+        foreach (Animation anim in holder.GetComponentsInChildren<Animation>())
+        {
+            anim.wrapMode = WrapMode.Loop;
+            anim.playAutomatically = true;
+            AnimationClip wanted = null;
+            if (anim.clip != null && anim.clip.name.IndexOf(clipNameContains, System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                wanted = anim.clip;
+            }
+            else
+            {
+                foreach (AnimationState state in anim)
+                {
+                    if (state.clip != null && state.clip.name.IndexOf(clipNameContains, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        wanted = state.clip;
+                        break;
+                    }
+                }
+            }
+            if (wanted != null)
+            {
+                anim.clip = wanted;
+                anim.Play();
+                Debug.Log("[Gltf] Playing embedded animation '" + wanted.name
+                    + "' (" + wanted.length.ToString("F1") + "s) on " + holder.name);
+            }
+            else if (anim.clip != null)
+            {
+                anim.Play();
+                Debug.LogWarning("[Gltf] Clip '" + clipNameContains + "' not found on " + holder.name
+                    + " — playing '" + anim.clip.name + "' instead");
+            }
+            else
+            {
+                Debug.LogWarning("[Gltf] Animation component on " + holder.name + " has no clip");
+            }
+        }
     }
 
     private static void Cleanup(GltfImport gltf, GameObject holder)
@@ -174,6 +406,18 @@ public static class GltfModelLoader
             b.Encapsulate(r.bounds);
         }
         Vector3 shift = new Vector3(pos.x - b.center.x, -b.min.y, pos.z - b.center.z);
+        // Animated models (rigged characters): glTFast bakes the legacy
+        // Animation clip paths relative to the holder. Wrapping the content
+        // in a ModelRoot would insert one level and break those paths, so
+        // apply the grounding shift to the single scene-root child directly
+        // and skip the wrapper. (Only valid with exactly one child; the
+        // shift is a world delta, the child lives in holder-local units,
+        // hence shift / s — same math as the ModelRoot branch below.)
+        if (holder.GetComponentInChildren<Animation>() != null && holder.transform.childCount == 1)
+        {
+            holder.transform.GetChild(0).localPosition += shift / s;
+            return;
+        }
         GameObject content = new GameObject("ModelRoot");
         content.transform.SetParent(holder.transform, false);
         Transform[] children = new Transform[holder.transform.childCount];

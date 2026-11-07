@@ -54,7 +54,7 @@ public class MobileControls : MonoBehaviour
             try { s_uiShader = Shader.Find("UI/Default"); } catch (System.Exception) { s_uiShader = null; }
             if (s_uiShader == null)
             {
-                Debug.LogError("[MobileControls] UI/Default shader NOT found — UI will render magenta!");
+                Debug.LogWarning("[MobileControls] UI/Default shader NOT found — UI will render magenta!");
             }
         }
         return s_uiShader;
@@ -264,9 +264,11 @@ public class MobileControls : MonoBehaviour
         objSh.effectColor = new Color(0f, 0f, 0f, 0.9f);
         objSh.effectDistance = new Vector2(2f, -2f);
 
-        // Subtitle (bottom-centre).
+        // Subtitle (bottom-centre, ABOVE the button row: y=210 clears the
+        // joystick top (182) and RUN button top (165) — controls redesign
+        // shrank the controls, so the subtitle moved down from y=300).
         subtitleText = MakeText(canvasGO.transform, "Subtitle", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-            new Vector2(0f, 185f), new Vector2(980f, 70f), 26, TextAnchor.MiddleCenter, "");
+            new Vector2(0f, 210f), new Vector2(900f, 70f), 26, TextAnchor.MiddleCenter, "");
         Shadow sh = subtitleText.gameObject.AddComponent<Shadow>();
         sh.effectColor = new Color(0f, 0f, 0f, 0.9f);
         sh.effectDistance = new Vector2(2f, -2f);
@@ -284,51 +286,98 @@ public class MobileControls : MonoBehaviour
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -90f), new Vector2(260f, 80f), 28);
         restartButton.onClick.AddListener(delegate
         {
+            AudioManager.PlayUIClick();
             if (gameManager != null) gameManager.Restart();
         });
         restartButton.gameObject.SetActive(false);
 
-        // Joystick (bottom-left).
+        // Joystick (bottom-left) — controls redesign 2026-11-07: the old
+        // 210 px flat-grey disc read as a plain grey blob. Now 140 px
+        // (~2/3), darker defined base + light rim + 4 directional
+        // triangles (like the reference image) + brighter knob.
+        // CHILD ORDER MATTERS: VirtualJoystick takes GetChild(0) as the
+        // knob, so the knob is added FIRST; ring + triangles come after.
         GameObject joyBG = new GameObject("Joystick");
         RectTransform joyRect = joyBG.AddComponent<RectTransform>();
         joyRect.SetParent(canvasGO.transform, false);
         joyRect.anchorMin = new Vector2(0f, 0f);
         joyRect.anchorMax = new Vector2(0f, 0f);
-        joyRect.anchoredPosition = new Vector2(150f, 150f);
-        joyRect.sizeDelta = new Vector2(210f, 210f);
+        joyRect.anchoredPosition = new Vector2(112f, 112f);
+        joyRect.sizeDelta = new Vector2(140f, 140f);
         Image joyImg = joyBG.AddComponent<Image>();
-        joyImg.color = new Color(1f, 1f, 1f, 0.14f);
+        joyImg.color = new Color(0.08f, 0.08f, 0.12f, 0.38f);
         ApplyUiMaterial(joyImg, false);
-        joystick = joyBG.AddComponent<VirtualJoystick>();
+        joyImg.sprite = ControlIcons.CircleSprite();
         GameObject knob = new GameObject("Knob");
         RectTransform knobRect = knob.AddComponent<RectTransform>();
         knobRect.SetParent(joyRect, false);
         knobRect.anchoredPosition = Vector2.zero;
-        knobRect.sizeDelta = new Vector2(96f, 96f);
+        knobRect.sizeDelta = new Vector2(64f, 64f);
         Image knobImg = knob.AddComponent<Image>();
-        knobImg.color = new Color(1f, 1f, 1f, 0.35f);
+        knobImg.color = new Color(1f, 1f, 1f, 0.5f);
         ApplyUiMaterial(knobImg, false);
+        knobImg.sprite = ControlIcons.CircleSprite();
+        joystick = joyBG.AddComponent<VirtualJoystick>();
+        joystick.radius = 40f;
+        // Rim ring (decorative — must not eat touches).
+        GameObject joyRing = new GameObject("Ring");
+        RectTransform ringRect = joyRing.AddComponent<RectTransform>();
+        ringRect.SetParent(joyRect, false);
+        ringRect.anchorMin = Vector2.zero;
+        ringRect.anchorMax = Vector2.one;
+        ringRect.offsetMin = Vector2.zero;
+        ringRect.offsetMax = Vector2.zero;
+        Image ringImg = joyRing.AddComponent<Image>();
+        ringImg.color = new Color(1f, 1f, 1f, 0.35f);
+        ringImg.raycastTarget = false;
+        ApplyUiMaterial(ringImg, false);
+        ringImg.sprite = ControlIcons.RingSprite();
+        // Directional triangles at N/E/S/W (decorative, no raycast).
+        AddJoyDirection(joyRect, new Vector2(0f, 48f), 0f);
+        AddJoyDirection(joyRect, new Vector2(48f, 0f), -90f);
+        AddJoyDirection(joyRect, new Vector2(0f, -48f), 180f);
+        AddJoyDirection(joyRect, new Vector2(-48f, 0f), 90f);
 
-        // Buttons (right side).
-        Button actionBtn = MakeButton(canvasGO.transform, "ActionBtn", "ACTION",
-            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-90f, 90f), new Vector2(130f, 130f), 26);
-        actionBtn.onClick.AddListener(delegate { if (player != null) player.Interact(); });
+        // Buttons (right side) — ROUND with symbols, no text labels.
+        // Controls redesign 2026-11-07: ~2/3 size (Action 130->86,
+        // Jump/Run 100->66, Torch/Lock 90->60), tighter cluster, icons
+        // bigger relative to the button (72%, was 62%) + a light rim so
+        // the symbols read clearly. Same anchors/functions as before.
+        Button actionBtn = MakeIconButton(canvasGO.transform, "ActionBtn", ControlIcons.IconKind.Hand,
+            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-62f, 62f), new Vector2(86f, 86f));
+        actionBtn.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (player != null) player.Interact(); });
 
-        Button jumpBtn = MakeButton(canvasGO.transform, "JumpBtn", "JUMP",
-            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-240f, 80f), new Vector2(100f, 100f), 24);
-        jumpBtn.onClick.AddListener(delegate { if (player != null) player.Jump(); });
+        Button jumpBtn = MakeIconButton(canvasGO.transform, "JumpBtn", ControlIcons.IconKind.Jump,
+            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-158f, 56f), new Vector2(66f, 66f));
+        jumpBtn.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (player != null) player.Jump(); });
 
-        Button runBtn = MakeButton(canvasGO.transform, "RunBtn", "RUN",
-            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-240f, 200f), new Vector2(100f, 100f), 24);
+        Button runBtn = MakeIconButton(canvasGO.transform, "RunBtn", ControlIcons.IconKind.Run,
+            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-158f, 132f), new Vector2(66f, 66f));
         AddHold(runBtn, delegate(bool held) { if (player != null) player.runHeld = held; });
 
-        torchButton = MakeButton(canvasGO.transform, "TorchBtn", "TORCH",
-            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-80f, -46f), new Vector2(130f, 60f), 22);
-        torchButton.onClick.AddListener(delegate { if (torch != null) torch.Toggle(); });
+        torchButton = MakeIconButton(canvasGO.transform, "TorchBtn", ControlIcons.IconKind.Flame,
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-54f, -32f), new Vector2(60f, 60f));
+        torchButton.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (torch != null) torch.Toggle(); });
 
-        lockButton = MakeButton(canvasGO.transform, "LockBtn", "LOCK",
-            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-230f, -46f), new Vector2(130f, 60f), 22);
-        lockButton.onClick.AddListener(delegate { if (gameManager != null) gameManager.ToggleLock(); });
+        lockButton = MakeIconButton(canvasGO.transform, "LockBtn", ControlIcons.IconKind.Lock,
+            new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-154f, -32f), new Vector2(60f, 60f));
+        lockButton.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (gameManager != null) gameManager.ToggleLock(); });
+    }
+
+    // One joystick direction triangle (decorative — never eats touches).
+    private void AddJoyDirection(RectTransform parent, Vector2 pos, float rotZ)
+    {
+        GameObject tri = new GameObject("Dir");
+        RectTransform rt = tri.AddComponent<RectTransform>();
+        rt.SetParent(parent, false);
+        rt.anchoredPosition = pos;
+        rt.sizeDelta = new Vector2(22f, 22f);
+        rt.localRotation = Quaternion.Euler(0f, 0f, rotZ);
+        Image img = tri.AddComponent<Image>();
+        img.color = new Color(1f, 1f, 1f, 0.5f);
+        img.raycastTarget = false;
+        ApplyUiMaterial(img, false);
+        img.sprite = ControlIcons.TriangleSprite();
     }
 
     private Text MakeText(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax,
@@ -353,7 +402,7 @@ public class MobileControls : MonoBehaviour
         ApplyUiMaterial(t, true);
         if (t.font == null)
         {
-            Debug.LogError("[MobileControls] UI font is NULL for text '" + name + "' — labels will be invisible!");
+            Debug.LogWarning("[MobileControls] UI font is NULL for text '" + name + "' — labels will be invisible!");
         }
         return t;
     }
@@ -392,6 +441,55 @@ public class MobileControls : MonoBehaviour
         Shadow ls = labelGO.AddComponent<Shadow>();
         ls.effectColor = new Color(0f, 0f, 0f, 0.9f);
         ls.effectDistance = new Vector2(2f, -2f);
+        return b;
+    }
+
+    // Round control button with a symbol icon — no text label.
+    // Background is the procedural circle sprite (dark, semi-transparent);
+    // the icon is a white symbol child, centred at ~72% of the button
+    // (controls redesign: was 62% — symbols must read clearly at the
+    // smaller ~2/3 size). A thin light rim outlines the button.
+    private Button MakeIconButton(Transform parent, string name, ControlIcons.IconKind icon,
+        Vector2 anchorMin, Vector2 anchorMax, Vector2 anchoredPos, Vector2 size)
+    {
+        GameObject go = new GameObject(name);
+        RectTransform rt = go.AddComponent<RectTransform>();
+        rt.SetParent(parent, false);
+        rt.anchorMin = anchorMin;
+        rt.anchorMax = anchorMax;
+        rt.anchoredPosition = anchoredPos;
+        rt.sizeDelta = size;
+        Image img = go.AddComponent<Image>();
+        img.color = kBtnColor;
+        ApplyUiMaterial(img, false);
+        img.sprite = ControlIcons.CircleSprite();
+        Button b = go.AddComponent<Button>();
+        b.targetGraphic = img;
+
+        GameObject rimGO = new GameObject("Rim");
+        RectTransform rimRt = rimGO.AddComponent<RectTransform>();
+        rimRt.SetParent(rt, false);
+        rimRt.anchorMin = Vector2.zero;
+        rimRt.anchorMax = Vector2.one;
+        rimRt.offsetMin = Vector2.zero;
+        rimRt.offsetMax = Vector2.zero;
+        Image rimImg = rimGO.AddComponent<Image>();
+        rimImg.color = new Color(1f, 1f, 1f, 0.22f);
+        rimImg.raycastTarget = false;
+        ApplyUiMaterial(rimImg, false);
+        rimImg.sprite = ControlIcons.RingSprite();
+
+        GameObject iconGO = new GameObject("Icon");
+        RectTransform irt = iconGO.AddComponent<RectTransform>();
+        irt.SetParent(rt, false);
+        irt.anchorMin = new Vector2(0.14f, 0.14f);
+        irt.anchorMax = new Vector2(0.86f, 0.86f);
+        irt.offsetMin = Vector2.zero;
+        irt.offsetMax = Vector2.zero;
+        Image iconImg = iconGO.AddComponent<Image>();
+        iconImg.color = Color.white;
+        ApplyUiMaterial(iconImg, false);
+        iconImg.sprite = ControlIcons.IconSprite(icon);
         return b;
     }
 

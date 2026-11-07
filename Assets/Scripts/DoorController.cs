@@ -50,6 +50,7 @@ public class DoorController : MonoBehaviour
             {
                 GameManager.Instance.ShowSubtitle("Darwaza band hai — pehle LOCK kholo.", 2f);
             }
+            AudioManager.PlayLockClunk();
             return;
         }
         SetOpen(!IsOpen);
@@ -59,6 +60,8 @@ public class DoorController : MonoBehaviour
     {
         IsOpen = open;
         targetYaw = open ? openYaw : closedYaw;
+        if (open) AudioManager.PlayDoorOpen(transform.position);
+        else AudioManager.PlayDoorClose(transform.position);
         if (open)
         {
             UnregisterBlock();
@@ -72,6 +75,7 @@ public class DoorController : MonoBehaviour
     public void SetLocked(bool locked)
     {
         IsLocked = locked;
+        AudioManager.PlayLockClunk();
         if (locked && IsOpen)
         {
             SetOpen(false);

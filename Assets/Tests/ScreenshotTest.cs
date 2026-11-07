@@ -101,29 +101,38 @@ public class ScreenshotTest
         Debug.Log("[Test] Visible UI buttons: " + visibleButtons);
         Assert.GreaterOrEqual(visibleButtons, 3, "Fewer than 3 visible UI buttons");
 
-        // (c2) Buttons must have readable labels: non-empty Text, a real
-        // font assigned, and an Image material using the UI/Default shader.
-        // (Run #16/#17 on the phone showed solid magenta blocks because
-        // the UI shader was stripped from the build.)
-        int labeledButtons = 0;
+        // (c2) Control buttons must show SYMBOL icons (no text labels):
+        // each active button needs a child "Icon" Image with a real sprite,
+        // and no Text label with words on it. (User order: no real game
+        // has word buttons — LOCK/TORCH/RUN/JUMP/ACTION are icons now.)
+        int iconButtons = 0;
         foreach (UnityEngine.UI.Button b in buttons)
         {
             if (!b.gameObject.activeInHierarchy) continue;
             UnityEngine.UI.Text label = b.GetComponentInChildren<UnityEngine.UI.Text>(true);
-            UnityEngine.UI.Image img = b.GetComponent<UnityEngine.UI.Image>();
-            string labelText = (label != null) ? label.text : "";
-            string shaderName = (img != null && img.material != null && img.material.shader != null)
-                ? img.material.shader.name : "<none>";
-            Debug.Log("[Test] Button '" + b.name + "' label='" + labelText + "' font="
-                + ((label != null && label.font != null) ? "OK" : "NULL") + " shader=" + shaderName);
-            if (label != null && !string.IsNullOrEmpty(labelText) && label.font != null
-                && img != null && img.material != null && img.material.shader != null
-                && img.material.shader.name.Contains("UI/Default"))
+            if (label != null && !string.IsNullOrEmpty(label.text))
             {
-                labeledButtons++;
+                Debug.Log("[Test] Button '" + b.name + "' still has a TEXT label: '" + label.text + "'");
+                continue;
             }
+            Transform iconT = b.transform.Find("Icon");
+            UnityEngine.UI.Image iconImg = iconT != null ? iconT.GetComponent<UnityEngine.UI.Image>() : null;
+            string iconState = (iconImg != null && iconImg.sprite != null) ? "OK" : "MISSING";
+            Debug.Log("[Test] Button '" + b.name + "' icon=" + iconState);
+            if (iconImg != null && iconImg.sprite != null) iconButtons++;
         }
-        Assert.GreaterOrEqual(labeledButtons, 3, "Fewer than 3 buttons with readable labels + UI/Default material");
+        Assert.GreaterOrEqual(iconButtons, 5, "Fewer than 5 icon buttons (expected Action/Jump/Run/Torch/Lock with symbols)");
+
+        // (c2b) Joystick base + knob must be round (circle sprite, not a
+        // square image).
+        GameObject joy = GameObject.Find("Joystick");
+        Assert.IsNotNull(joy, "Joystick not found");
+        UnityEngine.UI.Image joyImg = joy.GetComponent<UnityEngine.UI.Image>();
+        Assert.IsNotNull(joyImg != null ? joyImg.sprite : null, "Joystick base has no sprite (must be the circle sprite)");
+        Transform knobT = joy.transform.Find("Knob");
+        Assert.IsNotNull(knobT, "Joystick knob not found");
+        UnityEngine.UI.Image knobImg = knobT.GetComponent<UnityEngine.UI.Image>();
+        Assert.IsNotNull(knobImg != null ? knobImg.sprite : null, "Joystick knob has no sprite (must be the circle sprite)");
 
         // (c3) Nilesh must be the REAL rigged indian_man.glb model
         // ("Player/Nilesh", Phase 4), not the old dark capsule and not
@@ -155,11 +164,15 @@ public class ScreenshotTest
         Assert.IsTrue(File.Exists(shot1), "Screenshot 1 file missing: " + shot1);
 
         // Screenshot 2: second angle — wide view of the chowk from the east.
+        // Camera sits HIGH (y=10) and slightly west of the old spot: the
+        // banyan at (16,0,2) has a ~10 m wide canopy reaching to y~7, and
+        // the old (14,7,-12) pose put the lens inside its leaves (verified
+        // by Angle2DiagTest: TaroLeaf renderers 3 m from the camera).
         Vector3 savedPos = cam.transform.position;
         Quaternion savedRot = cam.transform.rotation;
         Behaviour follow = cam.GetComponent("CameraFollow") as Behaviour;
         if (follow != null) follow.enabled = false;
-        cam.transform.position = new Vector3(14f, 7f, -12f);
+        cam.transform.position = new Vector3(12f, 10f, -12f);
         cam.transform.LookAt(new Vector3(0f, 1f, 4f));
         yield return null;
         string shot2 = RenderScreenshot(cam, "main-scene-angle2.png", 1280, 720);

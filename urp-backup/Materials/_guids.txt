@@ -1,0 +1,12 @@
+field_grass = 3ec58316ca3d6d79f4849d7e538c8e7c
+ground_mud = bbf4eaaa4d0ecaf400e1e52a67aa9e83
+mat:FieldGrass = f93efd88d12c8fedf14f50fa733fcdff
+mat:GroundMud = 9eafc31429db49076d6303bde76be3e1
+mat:RoofTiles = 1b5c11c9f019f68cb364d70f09bc791a
+mat:StoneWall = e5307b9fe813f703f4b7c42f893b3464
+mat:WallPlaster = cd469e5ae0dea1ae44e173dc20410982
+mat:WoodPlanks = b76f1084f3c320f4f35141c4509f9e32
+roof_tiles = 0a7e9ace1c183b509efb8bb50bd6215e
+stone_wall = 2d9d86b0971da69465f7d38fef220bc4
+wall_plaster = b5384dbf36c8c0a821482510144b8eb0
+wood_planks = db175d4df7571953ff0203fbd9c70c34

@@ -17,6 +17,7 @@ public class CharacterWalk : MonoBehaviour
     private Vector3 prevPos;
     private float phase;
     private float speedSmooth;
+    private int m_lastStepIndex;
 
     void Start()
     {
@@ -38,6 +39,14 @@ public class CharacterWalk : MonoBehaviour
         float k = Mathf.Clamp01(speedSmooth / 4f); // 0 idle, 1 full walk/run
 
         phase += dt * (4f + speedSmooth * 1.6f) * (k > 0.02f ? 1f : 0f);
+
+        // One footstep per half-cycle (each leg strike).
+        int stepIndex = Mathf.FloorToInt(phase / Mathf.PI);
+        if (k > 0.02f && stepIndex != m_lastStepIndex)
+        {
+            m_lastStepIndex = stepIndex;
+            AudioManager.PlayFootstep(transform.position);
+        }
 
         // Bob: small vertical bounce while walking, tiny breathing when idle.
         float bob = (k > 0.02f)

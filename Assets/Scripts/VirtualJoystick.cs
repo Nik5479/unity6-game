@@ -12,7 +12,9 @@ public class VirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandler,
 
     private RectTransform bg;
     private RectTransform knob;
-    private float radius = 70f;
+    // Drag radius in UI px — scaled to the base size by MobileControls
+    // (controls redesign 2026-11-07: base 210 -> 140, radius 70 -> 40).
+    public float radius = 70f;
 
     void Awake()
     {
