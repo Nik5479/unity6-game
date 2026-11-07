@@ -49,12 +49,21 @@ public static class VillageColliders
 }
 
 /// <summary>
-/// THE FORGOTTEN VILLAGE — Phase 1 village builder.
-/// Builds the whole Phase 1 scene at runtime from primitives with
-/// Poly Haven CC0 PBR textures (Assets/Resources/Textures):
-///  - 6 houses around the main chowk (one enterable: Nilesh's house)
-///  - well, chowk lamp, small field, jungle edge (trees), fences, props
-///  - working door (hinge), monster figure, food pickup near the well
+/// THE FORGOTTEN VILLAGE — Phase 3 village builder.
+/// Builds the whole scene at runtime:
+///  - Phase 3: REAL Sketchfab .glb models (Assets/StreamingAssets/Models/)
+///    loaded at runtime via glTFast — 6 DIFFERENT houses (thatched hut
+///    shell for Nilesh's house + 5 other house models), real mango/
+///    banyan/palm trees, real well, carts, tractor, gate, animals
+///    (cow/goat/buffalo/horse/dog), handpump, matka, hospital bed,
+///    oil barrel. Each model is normalised by its rendered bounds
+///    (Sketchfab units are inconsistent) and gets an AABB collider.
+///    A model that fails to load falls back to the Phase 2 primitive
+///    (houses/trees/well) or is skipped (props/animals) — never fatal.
+///  - Phase 2 primitives remain as the structural fallback + the lane,
+///    field, fences, moon and the jungle-edge tree ring.
+///  - working door (hinge) on Nilesh's house, monster figure, food
+///    pickup near the well
 ///  - player figure: clothed humanoid (cream kurta, skin head, saffron
 ///    pagdi, dark pants) with walk bob — TEMPORARY placeholder until the
 ///    real indian_man.glb arrives; same capsule collider as before
@@ -62,7 +71,10 @@ public static class VillageColliders
 /// name, so the Standard shader is referenced by assets and included in
 /// the build — runtime Shader.Find is only a fallback. Each build step is
 /// wrapped in try/catch so one failure cannot kill the whole village, and
-/// an on-screen boot status line reports what was built.
+/// an on-screen boot status line reports what was built. The glTF
+/// shaders (glTF/PbrMetallicRoughness etc.) are in AlwaysIncludedShaders
+/// so glTFast can find them in the player build too — without them the
+/// runtime-loaded models would render magenta on the device.
 /// </summary>
 public class VillageBuilder : MonoBehaviour
 {
@@ -103,6 +115,14 @@ public class VillageBuilder : MonoBehaviour
     private Text bootStatusText;
     private int buildErrors;
 
+    // Phase 3: real .glb models load async via glTFast. The CI test waits
+    // for this flag (signalled by a "ModelsLoaded" GameObject — the test
+    // assembly cannot reference game classes) before asserting/screenshots.
+    public static bool AllModelsLoaded;
+    // Bed spot inside Nilesh's house (set while building the house, so the
+    // real hospital-bed model lands exactly where the primitive bed was).
+    private Vector3 playerBedPos = new Vector3(-11f, 0f, 4.3f);
+
     void Awake()
     {
         // Landscape lock (runtime belt-and-braces for ProjectSettings):
@@ -129,22 +149,49 @@ public class VillageBuilder : MonoBehaviour
         CreateBootStatus();
 
         // Each step is isolated: one failing step must not kill the village.
+        AllModelsLoaded = false;
         RunStep("Materials", BuildMaterials);
         RunStep("Ground", BuildGround);
         RunStep("PlayerFigure", BuildPlayerFigure);
-        RunStep("Houses", BuildHouses);
-        RunStep("WellAndLamp", BuildWellAndLamp);
-        RunStep("Field", BuildField);
-        RunStep("JungleAndFences", BuildJungleAndFences);
-        RunStep("Props", BuildProps);
-        RunStep("Moon", BuildMoon);
-        RunStep("SetupSystems", SetupSystems);
-        RunStep("SceneAmbience", SetupSceneAmbience);
+        // The rest loads async: real .glb models come in via glTFast, and
+        // the systems (door/monster/UI) are wired only after the village
+        // exists. Intro + camera check start at the end of the coroutine.
+        StartCoroutine(BuildVillageAsync());
+    }
 
-        SetBootStatus("Village: " + CountVillageObjects() + " objects built"
-            + (buildErrors > 0 ? " (" + buildErrors + " step errors — see log)" : ""));
-        StartCoroutine(IntroSequence());
-        StartCoroutine(VerifyCameraView());
+    // Phase 3: async village build. Real Sketchfab models load one by one
+    // (each with a primitive fallback); a failed model never kills the
+    // village. SetupSystems/SceneAmbience run after everything is placed.
+    private System.Collections.IEnumerator BuildVillageAsync()
+    {
+        bool ok = false;
+        try
+        {
+            yield return BuildHousesAsync();
+            yield return BuildWellAndLampAsync();
+            RunStep("Field", BuildField);
+            yield return BuildJungleAndFencesAsync();
+            yield return BuildPropsAsync();
+            RunStep("Moon", BuildMoon);
+            RunStep("SetupSystems", SetupSystems);
+            RunStep("SceneAmbience", SetupSceneAmbience);
+            ok = true;
+        }
+        finally
+        {
+            // Always signal, even on failure, so the CI test never waits
+            // forever — it proceeds with whatever did load.
+            AllModelsLoaded = true;
+            GameObject signal = new GameObject("ModelsLoaded");
+            signal.transform.SetParent(villageRoot, false);
+        }
+        if (ok)
+        {
+            SetBootStatus("Village: " + CountVillageObjects() + " objects built"
+                + (buildErrors > 0 ? " (" + buildErrors + " step errors — see log)" : ""));
+            StartCoroutine(IntroSequence());
+            StartCoroutine(VerifyCameraView());
+        }
     }
 
     // Runs one build step; a failure is logged and the build continues.
@@ -741,14 +788,109 @@ public class VillageBuilder : MonoBehaviour
     // ------------------------------------------------------------------
     private enum DoorSide { East, West }
 
-    private void BuildHouses()
+    // Phase 3: houses are REAL Sketchfab models now — 6 houses, EACH a
+    // different model (the user ordered every house different). The
+    // player's house keeps its working hinged door + interior + LOCK: the
+    // door assembly is fitted to the real hut's actual bounds. A model
+    // that fails to load falls back to the primitive house.
+    private System.Collections.IEnumerator BuildHousesAsync()
     {
-        BuildHouse("House_Player", new Vector3(-9f, 0f, 6f), 6f, 5f, 3f, DoorSide.East, true, false);
-        BuildHouse("House_2", new Vector3(9f, 0f, 8f), 5f, 4f, 3f, DoorSide.West, false, true);
-        BuildHouse("House_3", new Vector3(-9f, 0f, -9f), 5f, 4f, 3f, DoorSide.East, false, false);
-        BuildHouse("House_4", new Vector3(9f, 0f, -7f), 6f, 5f, 3f, DoorSide.West, false, true);
-        BuildHouse("House_5", new Vector3(-13f, 0f, 13f), 4f, 4f, 2.8f, DoorSide.East, false, false);
-        BuildHouse("House_6", new Vector3(13f, 0f, -14f), 4f, 4f, 2.8f, DoorSide.West, false, true);
+        // Player's house: real thatched hut shell + primitive door/interior.
+        Vector3 playerCenter = new Vector3(-9f, 0f, 6f);
+        GameObject hut = null;
+        yield return GltfModelLoader.LoadModel(
+            "thatched_hut_4_p31g.glb", villageRoot, "House_Player",
+            playerCenter, 0f, 6.5f, GltfModelLoader.NormalizeMode.ByWidth,
+            GltfModelLoader.ColliderMode.None, g => hut = g);
+        if (hut != null)
+        {
+            Bounds hb = GetWorldBounds(hut);
+            float w = hb.size.x;
+            float d = hb.size.z;
+            float doorX = hb.max.x - playerCenter.x;
+            BuildDoor(hut.transform, playerCenter, doorX, DoorSide.East, 1.2f, 2.2f);
+            BuildHouseInterior(hut.transform, playerCenter, w, d);
+            RegisterHouseDoorGap(hb, DoorSide.East, 1.2f, 2.2f);
+        }
+        else
+        {
+            BuildHouse("House_Player", playerCenter, 6f, 5f, 3f, DoorSide.East, true, false);
+        }
+
+        // Houses 2-6: one different real model each.
+        yield return BuildRealHouse("House_2", "village_house_for_game_20_lafr.glb",
+            new Vector3(9f, 0f, 8f), 15f, 5.5f);
+        yield return BuildRealHouse("House_3", "village_hut_house_21_tyn9.glb",
+            new Vector3(-9f, 0f, -9f), -10f, 4.5f);
+        yield return BuildRealHouse("House_4", "hut_with_thatched_pointed_roof_22_96py.glb",
+            new Vector3(9f, 0f, -7f), 25f, 5f);
+        yield return BuildRealHouse("House_5", "old_village_house_-_indian_game_asset_24_bac7.glb",
+            new Vector3(-13f, 0f, 13f), -20f, 5f);
+        yield return BuildRealHouse("House_6", "indian_village_house_famous_3d_model_37_4zjm.glb",
+            new Vector3(13f, 0f, -14f), 10f, 5f);
+    }
+
+    private System.Collections.IEnumerator BuildRealHouse(
+        string name, string file, Vector3 pos, float yaw, float size)
+    {
+        GameObject h = null;
+        yield return GltfModelLoader.LoadModel(
+            file, villageRoot, name, pos, yaw, size,
+            GltfModelLoader.NormalizeMode.ByWidth,
+            GltfModelLoader.ColliderMode.FullBounds, g => h = g);
+        if (h == null)
+        {
+            // Primitive fallback with the same footprint.
+            BuildHouse(name, pos, 5f, 4f, 3f,
+                (pos.x > 0f) ? DoorSide.West : DoorSide.East, false,
+                (name == "House_2" || name == "House_4"));
+        }
+    }
+
+    // World-space bounds of everything rendered under a loaded model.
+    private static Bounds GetWorldBounds(GameObject root)
+    {
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>();
+        if (renderers.Length == 0)
+        {
+            // No visible geometry (should not happen for a hut) — fall
+            // back to a default footprint so the door still gets built.
+            return new Bounds(root.transform.position, new Vector3(6f, 4f, 4f));
+        }
+        Bounds b = renderers[0].bounds;
+        foreach (Renderer r in renderers)
+        {
+            b.Encapsulate(r.bounds);
+        }
+        return b;
+    }
+
+    // Collision for a real hut used as the player's house: the hut's walls
+    // as AABBs, with a door-sized gap on the door face (same pattern as the
+    // primitive house) so the player can only enter through the door.
+    private void RegisterHouseDoorGap(Bounds hb, DoorSide side, float doorW, float doorH)
+    {
+        float wallH = Mathf.Min(hb.size.y, 4f);
+        float cx = hb.center.x;
+        float cz = hb.center.z;
+        float faceX = (side == DoorSide.East) ? hb.max.x : hb.min.x;
+        float backX = (side == DoorSide.East) ? hb.min.x : hb.max.x;
+        float segLen = (hb.size.z - doorW) / 2f;
+        if (segLen > 0.1f)
+        {
+            Block(new Vector3(faceX, wallH / 2f, cz - hb.size.z / 2f + segLen / 2f),
+                new Vector3(0.6f, wallH, segLen));
+            Block(new Vector3(faceX, wallH / 2f, cz + hb.size.z / 2f - segLen / 2f),
+                new Vector3(0.6f, wallH, segLen));
+        }
+        Block(new Vector3(faceX, doorH + (wallH - doorH) / 2f, cz),
+            new Vector3(0.6f, wallH - doorH, doorW));
+        Block(new Vector3(backX, wallH / 2f, cz),
+            new Vector3(0.6f, wallH, hb.size.z));
+        Block(new Vector3(cx, wallH / 2f, hb.min.z),
+            new Vector3(hb.size.x, wallH, 0.6f));
+        Block(new Vector3(cx, wallH / 2f, hb.max.z),
+            new Vector3(hb.size.x, wallH, 0.6f));
     }
 
     private void BuildHouse(string name, Vector3 center, float w, float d, float wallH, DoorSide doorSide, bool isPlayerHouse, bool plasterAlt)
@@ -874,9 +1016,10 @@ public class VillageBuilder : MonoBehaviour
 
     private void BuildHouseInterior(Transform root, Vector3 center, float w, float d)
     {
-        // Bed in the far corner.
-        Box("Bed", center + new Vector3(-w / 2f + 1.0f, 0.35f, -d / 2f + 0.8f), new Vector3(0.9f, 0.5f, 1.9f), matWood, root);
-        Box("BedPillow", center + new Vector3(-w / 2f + 1.0f, 0.65f, -d / 2f + 0.25f), new Vector3(0.7f, 0.18f, 0.4f), matPlaster, root);
+        // Bed spot: the real hospital-bed .glb is placed here in
+        // BuildPropsAsync (the primitive bed is gone). Remember the spot
+        // so Props can use it whichever house build ran.
+        playerBedPos = center + new Vector3(-w / 2f + 1.0f, 0f, -d / 2f + 0.8f);
         // Table + clay pot.
         Box("Table", center + new Vector3(w / 2f - 1.0f, 0.45f, -d / 2f + 0.8f), new Vector3(1.1f, 0.08f, 0.7f), matWood, root);
         Box("TableLeg", center + new Vector3(w / 2f - 1.0f, 0.22f, -d / 2f + 0.8f), new Vector3(0.1f, 0.45f, 0.1f), matWood, root);
@@ -888,22 +1031,33 @@ public class VillageBuilder : MonoBehaviour
     // ------------------------------------------------------------------
     // Well + chowk lamp
     // ------------------------------------------------------------------
-    private void BuildWellAndLamp()
+    private System.Collections.IEnumerator BuildWellAndLampAsync()
     {
-        // Stone well at the chowk edge (kept clear of the monster's lane path).
+        // Real stone well (.glb) at the chowk edge (kept clear of the
+        // monster's lane path). Normalised by height (the model includes
+        // its roof posts, so it is taller than wide).
         Vector3 wellPos = new Vector3(-4.5f, 0f, -3.5f);
-        Cylinder("Well", wellPos + new Vector3(0f, 0.5f, 0f), new Vector3(2.0f, 1.0f, 2.0f), matStone, villageRoot);
-        Cylinder("WellWater", wellPos + new Vector3(0f, 0.92f, 0f), new Vector3(1.7f, 0.06f, 1.7f), MakeFlat("WellWater", new Color(0.02f, 0.06f, 0.09f), 0.9f), villageRoot);
-        Cylinder("WellPostA", wellPos + new Vector3(-0.9f, 1.6f, 0f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
-        Cylinder("WellPostB", wellPos + new Vector3(0.9f, 1.6f, 0f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
-        GameObject wellRoof = Box("WellRoof", wellPos + new Vector3(0f, 2.8f, 0f), new Vector3(2.6f, 0.12f, 1.8f), matRoof, villageRoot);
-        wellRoof.transform.rotation = Quaternion.Euler(0f, 0f, 12f);
-        // Crossed wood beams under the well roof.
-        GameObject beamA = Box("WellBeamA", wellPos + new Vector3(0f, 2.62f, 0f), new Vector3(2.4f, 0.12f, 0.12f), matWood, villageRoot);
-        beamA.transform.rotation = Quaternion.Euler(0f, 0f, 10f);
-        GameObject beamB = Box("WellBeamB", wellPos + new Vector3(0f, 2.62f, 0f), new Vector3(0.12f, 0.12f, 1.7f), matWood, villageRoot);
-        beamB.transform.rotation = Quaternion.Euler(10f, 0f, 0f);
-        Block(wellPos + new Vector3(0f, 0.5f, 0f), new Vector3(2.2f, 1.1f, 2.2f));
+        GameObject well = null;
+        yield return GltfModelLoader.LoadModel(
+            "old_well_with_hanging_bucket_2_qm9u.glb", villageRoot, "Well",
+            wellPos, 0f, 2.4f, GltfModelLoader.NormalizeMode.ByHeight,
+            GltfModelLoader.ColliderMode.FullBounds, g => well = g);
+        if (well == null)
+        {
+            // Primitive fallback (Phase 2 well).
+            Cylinder("Well", wellPos + new Vector3(0f, 0.5f, 0f), new Vector3(2.0f, 1.0f, 2.0f), matStone, villageRoot);
+            Cylinder("WellWater", wellPos + new Vector3(0f, 0.92f, 0f), new Vector3(1.7f, 0.06f, 1.7f), MakeFlat("WellWater", new Color(0.02f, 0.06f, 0.09f), 0.9f), villageRoot);
+            Cylinder("WellPostA", wellPos + new Vector3(-0.9f, 1.6f, 0f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
+            Cylinder("WellPostB", wellPos + new Vector3(0.9f, 1.6f, 0f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
+            GameObject wellRoof = Box("WellRoof", wellPos + new Vector3(0f, 2.8f, 0f), new Vector3(2.6f, 0.12f, 1.8f), matRoof, villageRoot);
+            wellRoof.transform.rotation = Quaternion.Euler(0f, 0f, 12f);
+            // Crossed wood beams under the well roof.
+            GameObject beamA = Box("WellBeamA", wellPos + new Vector3(0f, 2.62f, 0f), new Vector3(2.4f, 0.12f, 0.12f), matWood, villageRoot);
+            beamA.transform.rotation = Quaternion.Euler(0f, 0f, 10f);
+            GameObject beamB = Box("WellBeamB", wellPos + new Vector3(0f, 2.62f, 0f), new Vector3(0.12f, 0.12f, 1.7f), matWood, villageRoot);
+            beamB.transform.rotation = Quaternion.Euler(10f, 0f, 0f);
+            Block(wellPos + new Vector3(0f, 0.5f, 0f), new Vector3(2.2f, 1.1f, 2.2f));
+        }
 
         // Food pickup (crate) next to the well.
         GameObject crate = Box("Pickup_Food", wellPos + new Vector3(1.9f, 0.3f, 1.2f), new Vector3(0.65f, 0.6f, 0.65f), matWood, villageRoot);
@@ -977,7 +1131,7 @@ public class VillageBuilder : MonoBehaviour
         Block(pos + new Vector3(0f, 1.1f, 0f), new Vector3(0.6f, 2.2f, 0.6f));
     }
 
-    private void BuildJungleAndFences()
+    private System.Collections.IEnumerator BuildJungleAndFencesAsync()
     {
         // Jungle edge: dark trees ringing the village.
         for (int x = -20; x <= 20; x += 4)
@@ -990,10 +1144,16 @@ public class VillageBuilder : MonoBehaviour
             BuildTree(new Vector3(-21f, 0f, z), 1.2f);
             BuildTree(new Vector3(21f, 0f, z), 1.0f + (Mathf.Abs(z) % 3) * 0.15f);
         }
-        // A few trees inside the village.
-        BuildTree(new Vector3(-16f, 0f, -2f), 1.1f);
-        BuildTree(new Vector3(16f, 0f, 2f), 1.3f);
-        BuildTree(new Vector3(-4f, 0f, 18f), 1.0f);
+        // Inner trees: REAL models (mango, banyan, palm + a tree cluster).
+        // Normalised by height — trees are taller than wide.
+        yield return LoadRealTree("mango_tree_3_sl11.glb", "Tree_Mango",
+            new Vector3(-16f, 0f, -2f), 6f, GltfModelLoader.ColliderMode.Trunk);
+        yield return LoadRealTree("banyan_tree_001_26_fyf3.glb", "Tree_Banyan",
+            new Vector3(16f, 0f, 2f), 7f, GltfModelLoader.ColliderMode.Trunk);
+        yield return LoadRealTree("palm_trees_27_x7l3.glb", "Tree_Palm",
+            new Vector3(-4f, 0f, 18f), 5f, GltfModelLoader.ColliderMode.FullBounds);
+        yield return LoadRealTree("trees_25_wae0.glb", "Tree_Pack",
+            new Vector3(-18f, 0f, -18f), 8f, GltfModelLoader.ColliderMode.FullBounds);
 
         // Wood fences along the main lane: posts + two rails per segment.
         for (int i = 0; i < 5; i++)
@@ -1003,6 +1163,20 @@ public class VillageBuilder : MonoBehaviour
         for (int i = 0; i < 4; i++)
         {
             BuildFenceSegment(new Vector3(5.5f, 0f, 10f + i * 3.0f), 2.6f);
+        }
+    }
+
+    private System.Collections.IEnumerator LoadRealTree(
+        string file, string goName, Vector3 pos, float height,
+        GltfModelLoader.ColliderMode colMode)
+    {
+        GameObject t = null;
+        yield return GltfModelLoader.LoadModel(
+            file, villageRoot, goName, pos, 0f, height,
+            GltfModelLoader.NormalizeMode.ByHeight, colMode, g => t = g);
+        if (t == null)
+        {
+            BuildTree(pos, 1.1f);
         }
     }
 
@@ -1016,16 +1190,71 @@ public class VillageBuilder : MonoBehaviour
         Block(pos + new Vector3(0f, 0.55f, 0f), new Vector3(0.3f, 1.1f, length));
     }
 
-    private void BuildProps()
+    // Phase 3: props + animals are REAL Sketchfab models now. A model
+    // that fails to load is simply skipped (decorative — no fallback).
+    // NOTE: the charpai .glb is deliberately NOT placed — its file carries
+    // a stray 911-unit "bake" plane that would render as a huge flat slab.
+    private System.Collections.IEnumerator BuildPropsAsync()
     {
-        // Crates and barrels scattered near houses.
-        Box("Crate1", new Vector3(6.5f, 0.35f, 4.5f), new Vector3(0.7f, 0.7f, 0.7f), matWood, villageRoot);
-        Box("Crate2", new Vector3(6.5f, 1.05f, 4.5f), new Vector3(0.55f, 0.55f, 0.55f), matWood, villageRoot);
-        Cylinder("Barrel1", new Vector3(-6f, 0.5f, -4f), new Vector3(0.8f, 1.0f, 0.8f), matWood, villageRoot);
-        Cylinder("Barrel2", new Vector3(12f, 0.5f, 11f), new Vector3(0.8f, 1.0f, 0.8f), matWood, villageRoot);
-        Block(new Vector3(6.5f, 0.5f, 4.5f), new Vector3(0.9f, 1.2f, 0.9f));
-        Block(new Vector3(-6f, 0.5f, -4f), new Vector3(0.9f, 1.0f, 0.9f));
-        Block(new Vector3(12f, 0.5f, 11f), new Vector3(0.9f, 1.0f, 0.9f));
+        // Vehicles / big props.
+        yield return LoadProp("medieval_wooden_cart_1_jab4.glb", "Cart",
+            new Vector3(5.5f, 0f, 3.0f), 0f, 2.2f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        yield return LoadProp("an_old_bullock_cart_14_bxqa.glb", "BullockCart",
+            new Vector3(-6f, 0f, -4f), 0f, 2.5f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        yield return LoadProp("tractor_12_35hh.glb", "Tractor",
+            new Vector3(12f, 0f, 11f), 30f, 3f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // Ancient gate at the south lane entrance — no collider, so the
+        // player can walk through the arch.
+        yield return LoadProp("ancient_gate_11_4q5m.glb", "Gate",
+            new Vector3(0f, 0f, 20.5f), 0f, 4f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        // Small props near the houses.
+        yield return LoadProp("handpump_3d_39_aah5.glb", "Handpump",
+            new Vector3(5f, 0f, 9f), 0f, 1.3f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+        yield return LoadProp("indian_terracotta_matka_red_clay_water_pot_40_ris7.glb", "Matka",
+            new Vector3(-5f, 0f, 8.5f), 0f, 0.5f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        yield return LoadProp("rusty_and_oil_stained_oil_barrel_43_s99h.glb", "OilBarrel",
+            new Vector3(7.5f, 0f, 3.5f), 0f, 0.7f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // Hospital bed INSIDE Nilesh's house (replaces the primitive bed).
+        yield return LoadProp("old_and_worn_out_hospital_bed_42_kn6o.glb", "HospitalBed",
+            playerBedPos, 90f, 2.1f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        // Animals: cow, goat and buffalo in the field; horse by the cart;
+        // the dog by Nilesh's house.
+        yield return LoadProp("cow_15_u1bj.glb", "Cow",
+            new Vector3(8f, 0f, 14f), 0f, 1.8f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        yield return LoadProp("goat_17_a8s1.glb", "Goat",
+            new Vector3(12f, 0f, 13f), 0f, 1f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        yield return LoadProp("water_buffalo_18_44fy.glb", "Buffalo",
+            new Vector3(6f, 0f, 17f), 0f, 2f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        yield return LoadProp("horse_riggedgame_ready_16_2abc.glb", "Horse",
+            new Vector3(5f, 0f, 6f), 0f, 2.4f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+        yield return LoadProp("shiba_19_54zt.glb", "Dog",
+            new Vector3(-6f, 0f, 8f), 0f, 0.8f,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+    }
+
+    private System.Collections.IEnumerator LoadProp(
+        string file, string goName, Vector3 pos, float yaw, float size,
+        GltfModelLoader.NormalizeMode normMode, GltfModelLoader.ColliderMode colMode)
+    {
+        GameObject p = null;
+        yield return GltfModelLoader.LoadModel(
+            file, villageRoot, goName, pos, yaw, size, normMode, colMode, g => p = g);
+        if (p == null)
+        {
+            Debug.LogWarning("[Village] Prop skipped (load failed): " + file);
+        }
     }
 
     private void BuildMoon()

@@ -112,6 +112,39 @@ activations can trigger a Unity 1-hour lockout. One push = one build.
 4. Open `Assets/Scenes/Main.unity`, press Play. WASD moves Nilesh,
    drag right side rotates the camera. Wait ~60 s for nightfall.
 
+## Phase 3 (real Sketchfab models, in `Assets/StreamingAssets/Models/`)
+
+- **glTFast 6.20.0** (`com.atteneder.gltfast`, git URL pinned to commit
+  `3c5cdc1b…`) loads the .glb models at runtime from StreamingAssets —
+  no local Unity / Editor import needed. The three glTF shaders
+  (`glTF/PbrMetallicRoughness`, `glTF/PbrSpecularGlossiness`, `glTF/Unlit`)
+  are in `AlwaysIncludedShaders`, otherwise glTFast cannot find them in
+  the player build and the models render magenta on the device.
+- **27 real models** (CC Attribution, see credits below): 8 different
+  houses (one per house — no repeats), mango/banyan/palm/tree-pack,
+  real well, wooden cart, bullock cart, tractor, ancient gate, cow,
+  horse, goat, water buffalo, dog, handpump, matka, hospital bed, oil
+  barrel. Sketchfab units are inconsistent (m/cm/mm/arbitrary), so
+  `GltfModelLoader` normalises every model by its rendered bounds and
+  grounds it; a failed model falls back to the Phase 2 primitive (or is
+  skipped for props). Low-poly / stylised models the user sent are NOT
+  in the build (see skip list in the credits).
+- Mixamo "Remy" FBX animations (Idle/Walk/Run/Jump) are on disk in
+  `mixamo/` but NOT wired in yet — the Phase 3 player figure is still
+  the kurta/pagdi humanoid.
+
+## Credits — 3D models (CC Attribution, via Sketchfab)
+
+- stealth86 — Thatched Hut, Mango Tree
+- Glowbox 3D — Old Well with Hanging Bucket
+- rakutin — Medieval Wooden Cart
+- Other models in `Assets/StreamingAssets/Models/` are CC Attribution
+  Sketchfab models, credited by model name in the game credits.
+- Skipped on purpose (low-poly / stylised — would break the realistic
+  look): low-poly India temple wall, stylised tombstones,
+  trees-and-bush low-poly pack, urban cop enforcer, LCT 3000,
+  rusty old car, wooden crate.
+
 ## Next steps (after Phase 1)
 
 1. URP switch (verified in-editor) + post-processing (bloom/vignette).

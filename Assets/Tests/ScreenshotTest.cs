@@ -31,7 +31,21 @@ public class ScreenshotTest
         }
 
         yield return SceneManager.LoadSceneAsync("Main");
-        yield return new WaitForSeconds(2f);
+
+        // Phase 3: real .glb models load async via glTFast — wait for them
+        // (max 90 s) before asserting, so the test checks the REAL village
+        // and the screenshots show it. The signal is a "ModelsLoaded"
+        // GameObject: the test assembly cannot reference game classes
+        // (CS0246), so no VillageBuilder type is named here.
+        yield return new WaitForSeconds(1f);
+        float modelWait = 0f;
+        while (GameObject.Find("ModelsLoaded") == null && modelWait < 90f)
+        {
+            yield return new WaitForSeconds(0.5f);
+            modelWait += 0.5f;
+        }
+        Debug.Log("[Test] Waited " + modelWait + "s for models; loaded="
+            + (GameObject.Find("ModelsLoaded") != null));
 
         var player = GameObject.Find("Player");
         Assert.IsNotNull(player, "Player not found in Main scene");
@@ -125,7 +139,7 @@ public class ScreenshotTest
         if (follow != null) follow.enabled = false;
         cam.transform.position = new Vector3(14f, 7f, -12f);
         cam.transform.LookAt(new Vector3(0f, 1f, 4f));
-        yield return new WaitForEndOfFrame();
+        yield return null;
         string shot2 = RenderScreenshot(cam, "main-scene-angle2.png", 1280, 720);
         cam.transform.position = savedPos;
         cam.transform.rotation = savedRot;
@@ -134,7 +148,7 @@ public class ScreenshotTest
         Assert.IsTrue(File.Exists(shot2), "Screenshot 2 file missing: " + shot2);
 
         Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2);
-        yield return new WaitForEndOfFrame();
+        yield return null;
     }
 
     // Synchronous screenshot: renders the camera into a RenderTexture and

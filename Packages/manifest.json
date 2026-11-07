@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.atteneder.gltfast": "https://github.com/atteneder/glTFast.git#3c5cdc1b5c0dc251c596b27ecffe05a83605a4b9",
     "com.ramenvr.autopilot": "file:com.ramenvr.autopilot-1.0.1.tgz",
     "com.unity.collab-proxy": "2.9.0",
     "com.unity.ide.rider": "3.0.34",
