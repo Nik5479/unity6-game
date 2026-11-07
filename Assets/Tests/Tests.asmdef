@@ -1,11 +1,7 @@
 {
   "name": "Tests",
   "references": [
-    "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner"
-  ],
-  "includePlatforms": [
-    "Editor"
+    "UnityEngine.TestRunner"
   ],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
