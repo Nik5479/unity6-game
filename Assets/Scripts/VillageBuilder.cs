@@ -55,8 +55,9 @@ public static class VillageColliders
 ///  - 6 houses around the main chowk (one enterable: Nilesh's house)
 ///  - well, chowk lamp, small field, jungle edge (trees), fences, props
 ///  - working door (hinge), monster figure, food pickup near the well
-///  - player placeholder figure (dark-clothed capsule figure — TEMPORARY,
-///    no realistic human model is available yet)
+///  - player figure: clothed humanoid (cream kurta, skin head, saffron
+///    pagdi, dark pants) with walk bob — TEMPORARY placeholder until the
+///    real indian_man.glb arrives; same capsule collider as before
 /// Materials are real .mat assets (Assets/Resources/Materials/) loaded by
 /// name, so the Standard shader is referenced by assets and included in
 /// the build — runtime Shader.Find is only a fallback. Each build step is
@@ -77,18 +78,24 @@ public class VillageBuilder : MonoBehaviour
 
     private Material matGround;
     private Material matPlaster;
+    private Material matPlaster2;
     private Material matWood;
     private Material matRoof;
     private Material matStone;
     private Material matGrass;
     private Material matLeaf;
+    private Material matLeaf2;
+    private Material matLeaf3;
     private Material matTrunk;
     private Material matDark;
     private Material matGlass;
     private Material matSkin;
-    private Material matKurta;
+    private Material matKurtaCream;
+    private Material matPagdi;
+    private Material matPants;
     private Material matEye;
     private Material matLampGlass;
+    private Material matShadowBlob;
 
     private Transform villageRoot;
     private Camera mainCam;
@@ -181,6 +188,7 @@ public class VillageBuilder : MonoBehaviour
             t.alignment = TextAnchor.MiddleCenter;
             t.color = Color.white;
             t.text = "Village: starting...";
+            MobileControls.ApplyUiMaterial(t, true);
             Shadow sh = textGO.AddComponent<Shadow>();
             sh.effectColor = new Color(0f, 0f, 0f, 0.9f);
             sh.effectDistance = new Vector2(2f, -2f);
@@ -435,13 +443,44 @@ public class VillageBuilder : MonoBehaviour
         }
 
         matLeaf = MakeFlat("Leaves", new Color(0.10f, 0.22f, 0.08f), 0.05f);
+        matLeaf2 = MakeFlat("Leaves2", new Color(0.13f, 0.28f, 0.09f), 0.05f);
+        matLeaf3 = MakeFlat("Leaves3", new Color(0.07f, 0.17f, 0.06f), 0.05f);
+        matPlaster2 = MakeMat("WallPlaster2", LoadTex("wall_plaster"), new Color(0.85f, 0.76f, 0.62f), 0.15f, new Vector2(2f, 1.5f));
         matTrunk = MakeFlat("Trunk", new Color(0.16f, 0.10f, 0.06f), 0.1f);
         matDark = MakeFlat("MonsterDark", new Color(0.02f, 0.02f, 0.025f), 0.0f);
         matGlass = MakeFlat("WindowGlass", new Color(0.03f, 0.04f, 0.07f), 0.6f);
         matSkin = MakeFlat("Skin", new Color(0.45f, 0.30f, 0.20f), 0.4f);
-        matKurta = MakeFlat("Kurta", new Color(0.12f, 0.11f, 0.14f), 0.35f);
+        matKurtaCream = MakeFlat("KurtaCream", new Color(0.88f, 0.82f, 0.68f), 0.5f);
+        matPagdi = MakeFlat("Pagdi", new Color(0.85f, 0.45f, 0.10f), 0.4f);
+        matPants = MakeFlat("Pants", new Color(0.18f, 0.16f, 0.14f), 0.4f);
         matEye = MakeEmissive("MonsterEyes", new Color(0.9f, 0.85f, 0.6f), new Color(1.4f, 1.1f, 0.35f));
         matLampGlass = MakeEmissive("LampGlass", new Color(1f, 0.85f, 0.55f), new Color(1.6f, 1.0f, 0.35f));
+        matShadowBlob = MakeTransparent("ShadowBlob", new Color(0f, 0f, 0f, 0.35f));
+    }
+
+    // Transparent flat material (ground shadow blobs, dirt patches).
+    private Material MakeTransparent(string name, Color color)
+    {
+        Shader s = GetStandardShader();
+        if (s == null)
+        {
+            Debug.LogError("[Village] Standard shader not available for " + name);
+            return null;
+        }
+        Material m = new Material(s);
+        m.name = name;
+        m.color = color;
+        m.SetFloat("_Mode", 3f);
+        m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        m.SetInt("_ZWrite", 0);
+        m.DisableKeyword("_ALPHATEST_ON");
+        m.EnableKeyword("_ALPHABLEND_ON");
+        m.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        m.renderQueue = 3000;
+        m.SetFloat("_Metallic", 0f);
+        m.SetFloat("_Glossiness", 0f);
+        return m;
     }
 
     // ------------------------------------------------------------------
@@ -591,6 +630,26 @@ public class VillageBuilder : MonoBehaviour
                 r.material = matGround;
             }
         }
+
+        // Dirt path patches along the main lane (worn ground, darker mud).
+        Material dirt = MakeFlat("DirtPath", new Color(0.45f, 0.35f, 0.24f), 0.05f);
+        for (int i = 0; i < 6; i++)
+        {
+            float z = -10f + i * 4f;
+            GameObject patch = Box("DirtPath", new Vector3(0f, 0.03f, z), new Vector3(2.4f, 0.04f, 3.4f), dirt, villageRoot);
+            Destroy(patch.GetComponent<Collider>());
+        }
+
+        // Grass tufts near the field edge.
+        Material tuftMat = MakeFlat("GrassTuft", new Color(0.18f, 0.32f, 0.10f), 0.05f);
+        for (int i = 0; i < 16; i++)
+        {
+            float x = 4f + (i % 8) * 1.4f;
+            float z = 12.5f + (i / 8) * 1.2f + ((i % 3) * 0.4f);
+            GameObject tuft = Box("GrassTuft", new Vector3(x, 0.2f, z), new Vector3(0.3f, 0.4f, 0.3f), tuftMat, villageRoot);
+            tuft.transform.rotation = Quaternion.Euler(0f, i * 23f, 0f);
+            Destroy(tuft.GetComponent<Collider>());
+        }
     }
 
     private void BuildPlayerFigure()
@@ -605,36 +664,75 @@ public class VillageBuilder : MonoBehaviour
             cubeRenderer.enabled = false;
         }
 
-        // TEMPORARY placeholder figure for Nilesh (no realistic human model yet):
-        // dark kurta capsule body, plain head (no face/features), simple limbs.
+        // Nilesh — clothed humanoid figure (TEMPORARY placeholder until the
+        // real indian_man.glb arrives: cream kurta, skin head, saffron
+        // pagdi, dark pants). Same capsule collider + camera logic as
+        // before; only the visuals changed. All parts hang under a
+        // "Figure" container so CharacterWalk can bob/swing them.
         Transform root = player.transform;
-        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-        body.name = "Body";
-        body.transform.SetParent(root, false);
-        body.transform.localPosition = new Vector3(0f, -0.05f, 0f);
-        body.transform.localScale = new Vector3(0.62f, 1.0f, 0.62f);
-        body.GetComponent<Renderer>().material = matKurta;
-        Destroy(body.GetComponent<Collider>());
+        GameObject figure = new GameObject("Figure");
+        figure.transform.SetParent(root, false);
+        figure.transform.localPosition = Vector3.zero;
+        Transform fig = figure.transform;
 
-        GameObject head = Sphere("Head", Vector3.zero, new Vector3(0.42f, 0.42f, 0.42f), matSkin, root);
-        head.transform.localPosition = new Vector3(0f, 0.72f, 0f);
+        // Kurta torso (cream) + collar + waist band.
+        // Player root sits at y=0.5 above ground, so local -0.5 = feet on the ground.
+        GameObject torso = Box("Torso", Vector3.zero, new Vector3(0.58f, 0.78f, 0.34f), matKurtaCream, fig);
+        torso.transform.localPosition = new Vector3(0f, 0.55f, 0f);
+        Destroy(torso.GetComponent<Collider>());
+        GameObject collar = Box("Collar", Vector3.zero, new Vector3(0.34f, 0.1f, 0.36f), matPagdi, fig);
+        collar.transform.localPosition = new Vector3(0f, 0.97f, 0f);
+        Destroy(collar.GetComponent<Collider>());
+        GameObject waist = Box("Waist", Vector3.zero, new Vector3(0.6f, 0.08f, 0.36f), matPants, fig);
+        waist.transform.localPosition = new Vector3(0f, 0.15f, 0f);
+        Destroy(waist.GetComponent<Collider>());
+
+        // Head (skin) + pagdi (saffron turban: flattened sphere + wrap band).
+        GameObject head = Sphere("Head", Vector3.zero, new Vector3(0.42f, 0.46f, 0.42f), matSkin, fig);
+        head.transform.localPosition = new Vector3(0f, 1.16f, 0f);
         Destroy(head.GetComponent<Collider>());
+        GameObject pagdi = Sphere("Pagdi", Vector3.zero, new Vector3(0.46f, 0.26f, 0.46f), matPagdi, fig);
+        pagdi.transform.localPosition = new Vector3(0f, 1.38f, 0f);
+        Destroy(pagdi.GetComponent<Collider>());
+        GameObject pagdiBand = Cylinder("PagdiBand", Vector3.zero, new Vector3(0.47f, 0.1f, 0.47f), matPagdi, fig);
+        pagdiBand.transform.localPosition = new Vector3(0f, 1.3f, 0f);
+        Destroy(pagdiBand.GetComponent<Collider>());
 
-        GameObject legL = Box("LegL", Vector3.zero, new Vector3(0.2f, 0.5f, 0.2f), matDark, root);
-        legL.transform.localPosition = new Vector3(-0.16f, -0.55f, 0f);
-        Destroy(legL.GetComponent<Collider>());
-
-        GameObject legR = Box("LegR", Vector3.zero, new Vector3(0.2f, 0.5f, 0.2f), matDark, root);
-        legR.transform.localPosition = new Vector3(0.16f, -0.55f, 0f);
-        Destroy(legR.GetComponent<Collider>());
-
-        GameObject armL = Box("ArmL", Vector3.zero, new Vector3(0.16f, 0.55f, 0.16f), matKurta, root);
-        armL.transform.localPosition = new Vector3(-0.4f, 0.15f, 0f);
+        // Arms: cream sleeves + skin hands.
+        GameObject armL = Box("ArmL", Vector3.zero, new Vector3(0.17f, 0.62f, 0.17f), matKurtaCream, fig);
+        armL.transform.localPosition = new Vector3(-0.4f, 0.55f, 0f);
         Destroy(armL.GetComponent<Collider>());
-
-        GameObject armR = Box("ArmR", Vector3.zero, new Vector3(0.16f, 0.55f, 0.16f), matKurta, root);
-        armR.transform.localPosition = new Vector3(0.4f, 0.15f, 0f);
+        GameObject handL = Sphere("HandL", Vector3.zero, new Vector3(0.15f, 0.15f, 0.15f), matSkin, fig);
+        handL.transform.localPosition = new Vector3(-0.4f, 0.2f, 0f);
+        Destroy(handL.GetComponent<Collider>());
+        GameObject armR = Box("ArmR", Vector3.zero, new Vector3(0.17f, 0.62f, 0.17f), matKurtaCream, fig);
+        armR.transform.localPosition = new Vector3(0.4f, 0.55f, 0f);
         Destroy(armR.GetComponent<Collider>());
+        GameObject handR = Sphere("HandR", Vector3.zero, new Vector3(0.15f, 0.15f, 0.15f), matSkin, fig);
+        handR.transform.localPosition = new Vector3(0.4f, 0.2f, 0f);
+        Destroy(handR.GetComponent<Collider>());
+
+        // Legs: dark pants + feet (feet bottom at local -0.5 = ground level).
+        GameObject legL = Box("LegL", Vector3.zero, new Vector3(0.22f, 0.55f, 0.22f), matPants, fig);
+        legL.transform.localPosition = new Vector3(-0.16f, -0.125f, 0f);
+        Destroy(legL.GetComponent<Collider>());
+        GameObject footL = Box("FootL", Vector3.zero, new Vector3(0.22f, 0.1f, 0.34f), matDark, fig);
+        footL.transform.localPosition = new Vector3(-0.16f, -0.45f, 0.05f);
+        Destroy(footL.GetComponent<Collider>());
+        GameObject legR = Box("LegR", Vector3.zero, new Vector3(0.22f, 0.55f, 0.22f), matPants, fig);
+        legR.transform.localPosition = new Vector3(0.16f, -0.125f, 0f);
+        Destroy(legR.GetComponent<Collider>());
+        GameObject footR = Box("FootR", Vector3.zero, new Vector3(0.22f, 0.1f, 0.34f), matDark, fig);
+        footR.transform.localPosition = new Vector3(0.16f, -0.45f, 0.05f);
+        Destroy(footR.GetComponent<Collider>());
+
+        // Walk bob + arm/leg swing (visual only).
+        CharacterWalk walk = player.AddComponent<CharacterWalk>();
+        walk.figureRoot = fig;
+        walk.armL = armL.transform;
+        walk.armR = armR.transform;
+        walk.legL = legL.transform;
+        walk.legR = legR.transform;
     }
 
     // ------------------------------------------------------------------
@@ -645,19 +743,23 @@ public class VillageBuilder : MonoBehaviour
 
     private void BuildHouses()
     {
-        BuildHouse("House_Player", new Vector3(-9f, 0f, 6f), 6f, 5f, 3f, DoorSide.East, true);
-        BuildHouse("House_2", new Vector3(9f, 0f, 8f), 5f, 4f, 3f, DoorSide.West, false);
-        BuildHouse("House_3", new Vector3(-9f, 0f, -9f), 5f, 4f, 3f, DoorSide.East, false);
-        BuildHouse("House_4", new Vector3(9f, 0f, -7f), 6f, 5f, 3f, DoorSide.West, false);
-        BuildHouse("House_5", new Vector3(-13f, 0f, 13f), 4f, 4f, 2.8f, DoorSide.East, false);
-        BuildHouse("House_6", new Vector3(13f, 0f, -14f), 4f, 4f, 2.8f, DoorSide.West, false);
+        BuildHouse("House_Player", new Vector3(-9f, 0f, 6f), 6f, 5f, 3f, DoorSide.East, true, false);
+        BuildHouse("House_2", new Vector3(9f, 0f, 8f), 5f, 4f, 3f, DoorSide.West, false, true);
+        BuildHouse("House_3", new Vector3(-9f, 0f, -9f), 5f, 4f, 3f, DoorSide.East, false, false);
+        BuildHouse("House_4", new Vector3(9f, 0f, -7f), 6f, 5f, 3f, DoorSide.West, false, true);
+        BuildHouse("House_5", new Vector3(-13f, 0f, 13f), 4f, 4f, 2.8f, DoorSide.East, false, false);
+        BuildHouse("House_6", new Vector3(13f, 0f, -14f), 4f, 4f, 2.8f, DoorSide.West, false, true);
     }
 
-    private void BuildHouse(string name, Vector3 center, float w, float d, float wallH, DoorSide doorSide, bool isPlayerHouse)
+    private void BuildHouse(string name, Vector3 center, float w, float d, float wallH, DoorSide doorSide, bool isPlayerHouse, bool plasterAlt)
     {
         Transform root = new GameObject(name).transform;
         root.SetParent(villageRoot, false);
         root.position = center;
+
+        // Alternate plaster tint per house so the village is not one flat colour.
+        Material plaster = plasterAlt ? matPlaster2 : matPlaster;
+        if (plaster == null) plaster = matPlaster;
 
         float t = 0.3f;          // wall thickness
         float doorW = 1.2f;
@@ -669,15 +771,15 @@ public class VillageBuilder : MonoBehaviour
         // Back wall (+/-X opposite the door) and side walls (+/-Z).
         float doorX = (doorSide == DoorSide.East) ? (w / 2f) : (-w / 2f);
         float backX = -doorX;
-        Box(name + "_WallBack", center + new Vector3(backX, wallH / 2f, 0f), new Vector3(t, wallH, d), matPlaster, root);
-        Box(name + "_WallSideA", center + new Vector3(0f, wallH / 2f, d / 2f), new Vector3(w, wallH, t), matPlaster, root);
-        Box(name + "_WallSideB", center + new Vector3(0f, wallH / 2f, -d / 2f), new Vector3(w, wallH, t), matPlaster, root);
+        Box(name + "_WallBack", center + new Vector3(backX, wallH / 2f, 0f), new Vector3(t, wallH, d), plaster, root);
+        Box(name + "_WallSideA", center + new Vector3(0f, wallH / 2f, d / 2f), new Vector3(w, wallH, t), plaster, root);
+        Box(name + "_WallSideB", center + new Vector3(0f, wallH / 2f, -d / 2f), new Vector3(w, wallH, t), plaster, root);
 
         // Front (door) wall: two segments + lintel above the door.
         float segLen = (d - doorW) / 2f;
-        Box(name + "_WallFrontA", center + new Vector3(doorX, wallH / 2f, d / 2f - segLen / 2f), new Vector3(t, wallH, segLen), matPlaster, root);
-        Box(name + "_WallFrontB", center + new Vector3(doorX, wallH / 2f, -d / 2f + segLen / 2f), new Vector3(t, wallH, segLen), matPlaster, root);
-        Box(name + "_WallLintel", center + new Vector3(doorX, doorH + (wallH - doorH) / 2f, 0f), new Vector3(t, wallH - doorH, doorW), matPlaster, root);
+        Box(name + "_WallFrontA", center + new Vector3(doorX, wallH / 2f, d / 2f - segLen / 2f), new Vector3(t, wallH, segLen), plaster, root);
+        Box(name + "_WallFrontB", center + new Vector3(doorX, wallH / 2f, -d / 2f + segLen / 2f), new Vector3(t, wallH, segLen), plaster, root);
+        Box(name + "_WallLintel", center + new Vector3(doorX, doorH + (wallH - doorH) / 2f, 0f), new Vector3(t, wallH - doorH, doorW), plaster, root);
 
         // Sloped clay-tile roof: two panels meeting at a ridge along X.
         float roofY = wallH + 0.55f;
@@ -688,9 +790,16 @@ public class VillageBuilder : MonoBehaviour
         // Ridge beam.
         Box(name + "_RoofRidge", center + new Vector3(0f, wallH + 1.05f, 0f), new Vector3(w + 0.8f, 0.18f, 0.25f), matWood, root);
 
-        // Windows (dark glass) on the side walls.
-        Box(name + "_WindowA", center + new Vector3(-w / 4f, 1.7f, d / 2f + 0.02f), new Vector3(0.8f, 0.8f, 0.06f), matGlass, root);
-        Box(name + "_WindowB", center + new Vector3(w / 4f, 1.7f, -d / 2f - 0.02f), new Vector3(0.8f, 0.8f, 0.06f), matGlass, root);
+        // Door frame: two wood posts + a lintel beam around the doorway.
+        float outDir = (doorSide == DoorSide.East) ? 1f : -1f;
+        float frameX = doorX + outDir * 0.22f;
+        Box(name + "_DoorFrameL", center + new Vector3(frameX, doorH / 2f, doorW / 2f + 0.09f), new Vector3(0.18f, doorH + 0.1f, 0.18f), matWood, root);
+        Box(name + "_DoorFrameR", center + new Vector3(frameX, doorH / 2f, -doorW / 2f - 0.09f), new Vector3(0.18f, doorH + 0.1f, 0.18f), matWood, root);
+        Box(name + "_DoorFrameTop", center + new Vector3(frameX, doorH + 0.09f, 0f), new Vector3(0.18f, 0.18f, doorW + 0.36f), matWood, root);
+
+        // Windows (dark glass) on the side walls, with wood frames + cross bars.
+        FrameWindow(root, name, center + new Vector3(-w / 4f, 1.7f, d / 2f), 1f);
+        FrameWindow(root, name, center + new Vector3(w / 4f, 1.7f, -d / 2f), -1f);
 
         // Collision: wall segments as AABBs (doorway stays open).
         Block(center + new Vector3(backX, wallH / 2f, 0f), new Vector3(t + 0.2f, wallH, d));
@@ -705,6 +814,21 @@ public class VillageBuilder : MonoBehaviour
             BuildDoor(root, center, doorX, doorSide, doorW, doorH);
             BuildHouseInterior(root, center, w, d);
         }
+    }
+
+    // Window glass + wood frame (top/bottom rails, side posts, cross bars).
+    // zDir: +1 = window on the +Z wall, -1 = on the -Z wall.
+    private void FrameWindow(Transform root, string name, Vector3 pos, float zDir)
+    {
+        float z = pos.z + zDir * 0.02f;
+        float fz = pos.z + zDir * 0.06f;
+        Box(name + "_WindowGlass", new Vector3(pos.x, pos.y, z), new Vector3(0.8f, 0.8f, 0.06f), matGlass, root);
+        Box(name + "_WindowTop", new Vector3(pos.x, pos.y + 0.45f, fz), new Vector3(0.96f, 0.1f, 0.08f), matWood, root);
+        Box(name + "_WindowBottom", new Vector3(pos.x, pos.y - 0.45f, fz), new Vector3(0.96f, 0.1f, 0.08f), matWood, root);
+        Box(name + "_WindowLeft", new Vector3(pos.x - 0.45f, pos.y, fz), new Vector3(0.1f, 0.96f, 0.08f), matWood, root);
+        Box(name + "_WindowRight", new Vector3(pos.x + 0.45f, pos.y, fz), new Vector3(0.1f, 0.96f, 0.08f), matWood, root);
+        Box(name + "_WindowBarV", new Vector3(pos.x, pos.y, fz), new Vector3(0.07f, 0.8f, 0.06f), matWood, root);
+        Box(name + "_WindowBarH", new Vector3(pos.x, pos.y, fz), new Vector3(0.8f, 0.07f, 0.06f), matWood, root);
     }
 
     private void BuildDoor(Transform root, Vector3 center, float doorX, DoorSide doorSide, float doorW, float doorH)
@@ -774,6 +898,11 @@ public class VillageBuilder : MonoBehaviour
         Cylinder("WellPostB", wellPos + new Vector3(0.9f, 1.6f, 0f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
         GameObject wellRoof = Box("WellRoof", wellPos + new Vector3(0f, 2.8f, 0f), new Vector3(2.6f, 0.12f, 1.8f), matRoof, villageRoot);
         wellRoof.transform.rotation = Quaternion.Euler(0f, 0f, 12f);
+        // Crossed wood beams under the well roof.
+        GameObject beamA = Box("WellBeamA", wellPos + new Vector3(0f, 2.62f, 0f), new Vector3(2.4f, 0.12f, 0.12f), matWood, villageRoot);
+        beamA.transform.rotation = Quaternion.Euler(0f, 0f, 10f);
+        GameObject beamB = Box("WellBeamB", wellPos + new Vector3(0f, 2.62f, 0f), new Vector3(0.12f, 0.12f, 1.7f), matWood, villageRoot);
+        beamB.transform.rotation = Quaternion.Euler(10f, 0f, 0f);
         Block(wellPos + new Vector3(0f, 0.5f, 0f), new Vector3(2.2f, 1.1f, 2.2f));
 
         // Food pickup (crate) next to the well.
@@ -786,6 +915,8 @@ public class VillageBuilder : MonoBehaviour
         Vector3 lampPos = new Vector3(2.5f, 0f, 1.5f);
         Cylinder("LampPole", lampPos + new Vector3(0f, 1.6f, 0f), new Vector3(0.22f, 3.2f, 0.22f), matDark, villageRoot);
         Box("LampHead", lampPos + new Vector3(0f, 3.3f, 0f), new Vector3(0.5f, 0.45f, 0.5f), matLampGlass, villageRoot);
+        GameObject bulb = Sphere("LampBulb", lampPos + new Vector3(0f, 3.28f, 0f), new Vector3(0.3f, 0.3f, 0.3f), matLampGlass, villageRoot);
+        Destroy(bulb.GetComponent<Collider>());
         GameObject lightGO = new GameObject("LampLight");
         lightGO.transform.SetParent(villageRoot, false);
         lightGO.transform.position = lampPos + new Vector3(0f, 3.2f, 0f);
@@ -825,9 +956,24 @@ public class VillageBuilder : MonoBehaviour
         Transform root = new GameObject("Tree").transform;
         root.SetParent(villageRoot, false);
         root.position = pos;
+        // Slight deterministic lean/rotation so trees are not clones.
+        float lean = Mathf.Sin(pos.x * 12.9898f + pos.z * 78.233f) * 4f;
+        root.rotation = Quaternion.Euler(lean * 0.5f, Mathf.Abs(Mathf.Sin(pos.x * 3.7f)) * 180f, lean);
+
+        // Trunk (tapered look: two stacked cylinders).
         Cylinder("Trunk", pos + new Vector3(0f, 1.1f * scale, 0f), new Vector3(0.35f * scale, 2.2f * scale, 0.35f * scale), matTrunk, root);
-        Sphere("CanopyA", pos + new Vector3(0f, 2.8f * scale, 0f), new Vector3(2.4f * scale, 1.8f * scale, 2.4f * scale), matLeaf, root);
-        Sphere("CanopyB", pos + new Vector3(0.7f * scale, 2.2f * scale, 0.3f * scale), new Vector3(1.5f * scale, 1.1f * scale, 1.5f * scale), matLeaf, root);
+        Cylinder("TrunkTop", pos + new Vector3(0f, 2.1f * scale, 0f), new Vector3(0.22f * scale, 0.6f * scale, 0.22f * scale), matTrunk, root);
+        // Canopy: three overlapping blobs, varied greens — no more single lollipop ball.
+        Sphere("CanopyA", pos + new Vector3(0f, 2.9f * scale, 0f), new Vector3(2.6f * scale, 1.9f * scale, 2.6f * scale), matLeaf, root);
+        Sphere("CanopyB", pos + new Vector3(0.85f * scale, 2.35f * scale, 0.4f * scale), new Vector3(1.6f * scale, 1.15f * scale, 1.6f * scale), matLeaf2, root);
+        Sphere("CanopyC", pos + new Vector3(-0.75f * scale, 2.45f * scale, -0.35f * scale), new Vector3(1.45f * scale, 1.05f * scale, 1.45f * scale), matLeaf3, root);
+        Sphere("CanopyD", pos + new Vector3(0.1f * scale, 3.5f * scale, -0.2f * scale), new Vector3(1.3f * scale, 0.9f * scale, 1.3f * scale), matLeaf2, root);
+        // Ground shadow blob under the tree.
+        if (matShadowBlob != null)
+        {
+            GameObject blob = Cylinder("TreeShadow", pos + new Vector3(0f, 0.03f, 0f), new Vector3(3.2f * scale, 0.02f, 3.2f * scale), matShadowBlob, root);
+            Destroy(blob.GetComponent<Collider>());
+        }
         Block(pos + new Vector3(0f, 1.1f, 0f), new Vector3(0.6f, 2.2f, 0.6f));
     }
 
@@ -849,19 +995,25 @@ public class VillageBuilder : MonoBehaviour
         BuildTree(new Vector3(16f, 0f, 2f), 1.3f);
         BuildTree(new Vector3(-4f, 0f, 18f), 1.0f);
 
-        // Wood fences along the main lane.
+        // Wood fences along the main lane: posts + two rails per segment.
         for (int i = 0; i < 5; i++)
         {
-            float z = -12f + i * 3.2f;
-            Box("Fence", new Vector3(-5.5f, 0.55f, z), new Vector3(0.12f, 1.1f, 2.8f), matWood, villageRoot);
-            Block(new Vector3(-5.5f, 0.55f, z), new Vector3(0.3f, 1.1f, 2.8f));
+            BuildFenceSegment(new Vector3(-5.5f, 0f, -12f + i * 3.2f), 2.8f);
         }
         for (int i = 0; i < 4; i++)
         {
-            float z = 10f + i * 3.0f;
-            Box("Fence", new Vector3(5.5f, 0.55f, z), new Vector3(0.12f, 1.1f, 2.6f), matWood, villageRoot);
-            Block(new Vector3(5.5f, 0.55f, z), new Vector3(0.3f, 1.1f, 2.6f));
+            BuildFenceSegment(new Vector3(5.5f, 0f, 10f + i * 3.0f), 2.6f);
         }
+    }
+
+    private void BuildFenceSegment(Vector3 pos, float length)
+    {
+        float half = length / 2f;
+        Box("FencePostA", pos + new Vector3(0f, 0.6f, -half), new Vector3(0.16f, 1.2f, 0.16f), matWood, villageRoot);
+        Box("FencePostB", pos + new Vector3(0f, 0.6f, half), new Vector3(0.16f, 1.2f, 0.16f), matWood, villageRoot);
+        Box("FenceRailTop", pos + new Vector3(0f, 0.95f, 0f), new Vector3(0.09f, 0.12f, length), matWood, villageRoot);
+        Box("FenceRailLow", pos + new Vector3(0f, 0.45f, 0f), new Vector3(0.09f, 0.12f, length), matWood, villageRoot);
+        Block(pos + new Vector3(0f, 0.55f, 0f), new Vector3(0.3f, 1.1f, length));
     }
 
     private void BuildProps()
@@ -910,6 +1062,12 @@ public class VillageBuilder : MonoBehaviour
         if (sunGO != null)
         {
             cycle.sun = sunGO.GetComponent<Light>();
+            // Hard shadows from the sun (was off — the scene looked flat).
+            // Quality level is forced to shadows-on below, so this applies.
+            cycle.sun.shadows = LightShadows.Soft;
+            cycle.sun.shadowStrength = 0.9f;
+            cycle.sun.shadowBias = 0.02f;
+            cycle.sun.shadowNormalBias = 0.05f;
         }
         cycle.lampLight = lampLight;
         cycle.moonMaterial = moonMaterial;
@@ -986,6 +1144,16 @@ public class VillageBuilder : MonoBehaviour
 
     private void SetupSceneAmbience()
     {
+        // Shadows on for every quality level (Android default was Low = no shadows).
+        try
+        {
+            QualitySettings.shadows = ShadowQuality.All;
+            QualitySettings.shadowDistance = 45f;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Shadow settings failed: " + e.Message);
+        }
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.ExponentialSquared;
         RenderSettings.fogDensity = 0.004f;

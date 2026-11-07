@@ -39,7 +39,7 @@ public class DayNightCycle : MonoBehaviour
     private static readonly Color kDayFog = new Color(0.6f, 0.65f, 0.7f);
     private static readonly Color kNightFog = new Color(0.03f, 0.04f, 0.08f);
     private static readonly Color kDayAmbient = new Color(0.55f, 0.55f, 0.55f);
-    private static readonly Color kNightAmbient = new Color(0.07f, 0.08f, 0.13f);
+    private static readonly Color kNightAmbient = new Color(0.10f, 0.11f, 0.16f);
 
     void Awake()
     {
@@ -106,7 +106,7 @@ public class DayNightCycle : MonoBehaviour
     private void ApplyBlend(float k)
     {
         SetSun(Mathf.Lerp(1f, 0.25f, k), Color.Lerp(kDaySun, kNightMoon, k), Mathf.Lerp(50f, 16f, k));
-        SetSky(Color.Lerp(kDaySky, kNightSky, k), Color.Lerp(kDayFog, kNightFog, k), Mathf.Lerp(0.004f, 0.022f, k), Color.Lerp(kDayAmbient, kNightAmbient, k));
+        SetSky(Color.Lerp(kDaySky, kNightSky, k), Color.Lerp(kDayFog, kNightFog, k), Mathf.Lerp(0.004f, 0.018f, k), Color.Lerp(kDayAmbient, kNightAmbient, k));
         SetLamp(k);
         SetMoon(k);
     }
@@ -114,7 +114,7 @@ public class DayNightCycle : MonoBehaviour
     private void ApplyNight()
     {
         SetSun(0.25f, kNightMoon, 16f);
-        SetSky(kNightSky, kNightFog, 0.022f, kNightAmbient);
+        SetSky(kNightSky, kNightFog, 0.018f, kNightAmbient);
         // Lamp flickers: mostly on, occasional dips (horror feel).
         lampFlickerT += Time.deltaTime;
         float flicker = 1.35f;

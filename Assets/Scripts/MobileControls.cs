@@ -5,7 +5,7 @@ using UnityEngine.UI;
 /// <summary>
 /// Mobile controls + HUD, built entirely at runtime (no hand-written
 /// UI scene YAML). Creates:
-///  - Canvas (ScreenSpaceOverlay) + EventSystem
+///  - Canvas (ScreenSpaceCamera, so CI screenshots capture the UI) + EventSystem
 ///  - virtual joystick (bottom-left), buttons RUN / JUMP / ACTION /
 ///    TORCH / LOCK (bottom-right + top-right)
 ///  - subtitle line (monster's mimicked voice), objective (top-left),
@@ -31,6 +31,89 @@ public class MobileControls : MonoBehaviour
 
     private static readonly Color kBtnColor = new Color(0.12f, 0.12f, 0.16f, 0.62f);
     private static readonly Color kBtnOnColor = new Color(0.85f, 0.55f, 0.15f, 0.85f);
+
+    // ------------------------------------------------------------------
+    // UI shader/material fix (magenta buttons on device).
+    // Root cause: the scene has no Canvas, so the UI/Default shader was
+    // stripped from the Android build and every runtime-built Image/Text
+    // rendered with the magenta error material. The fix is two layers:
+    //  (1) ProjectSettings/GraphicsSettings AlwaysIncludedShaders now
+    //      lists the UI shaders, and (2) every Graphic created here gets
+    //      an EXPLICIT material from Shader.Find + a real white sprite,
+    //      so nothing depends on Unity's default UI material. If the
+    //      shader is still missing, the error is logged (never silent).
+    // ------------------------------------------------------------------
+    private static Shader s_uiShader;
+    private static Shader s_uiFontShader;
+    private static Sprite s_whiteSprite;
+
+    public static Shader UiDefaultShader()
+    {
+        if (s_uiShader == null)
+        {
+            try { s_uiShader = Shader.Find("UI/Default"); } catch (System.Exception) { s_uiShader = null; }
+            if (s_uiShader == null)
+            {
+                Debug.LogError("[MobileControls] UI/Default shader NOT found — UI will render magenta!");
+            }
+        }
+        return s_uiShader;
+    }
+
+    public static Shader UiDefaultFontShader()
+    {
+        if (s_uiFontShader == null)
+        {
+            try { s_uiFontShader = Shader.Find("UI/Default Font"); } catch (System.Exception) { s_uiFontShader = null; }
+            if (s_uiFontShader == null)
+            {
+                // Fallback: UI/Default samples the font texture the same way.
+                s_uiFontShader = UiDefaultShader();
+            }
+        }
+        return s_uiFontShader;
+    }
+
+    // White 1x1 sprite shared by all runtime-built Images (an Image with a
+    // null sprite is undefined behaviour on some drivers).
+    public static Sprite WhiteSprite()
+    {
+        if (s_whiteSprite == null)
+        {
+            Texture2D t = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            t.SetPixel(0, 0, Color.white);
+            t.Apply();
+            s_whiteSprite = Sprite.Create(t, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f), 100f);
+        }
+        return s_whiteSprite;
+    }
+
+    // Give a runtime-built Graphic a real material + (for Images) a real
+    // sprite. Safe to call from other builders (VillageBuilder boot text).
+    public static void ApplyUiMaterial(Graphic g, bool isText)
+    {
+        if (g == null) return;
+        try
+        {
+            Shader s = isText ? UiDefaultFontShader() : UiDefaultShader();
+            if (s != null)
+            {
+                g.material = new Material(s);
+            }
+            if (!isText)
+            {
+                Image img = g as Image;
+                if (img != null && img.sprite == null)
+                {
+                    img.sprite = WhiteSprite();
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[MobileControls] ApplyUiMaterial failed: " + e.Message);
+        }
+    }
 
     void Awake()
     {
@@ -144,10 +227,23 @@ public class MobileControls : MonoBehaviour
 
     private void BuildUI()
     {
-        // Canvas.
+        // Canvas — Screen Space - CAMERA (not Overlay) so Camera.Render
+        // captures the UI in CI screenshots, and the UI always sits in
+        // front of the 3D world at a fixed distance from the gameplay camera.
         GameObject canvasGO = new GameObject("MobileCanvas");
         Canvas canvas = canvasGO.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        Camera uiCam = Camera.main;
+        if (uiCam != null)
+        {
+            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            canvas.worldCamera = uiCam;
+            canvas.planeDistance = 1f;
+        }
+        else
+        {
+            Debug.LogWarning("[MobileControls] No Main Camera for UI canvas — falling back to Overlay");
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        }
         canvas.sortingOrder = 10;
         CanvasScaler scaler = canvasGO.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -164,6 +260,9 @@ public class MobileControls : MonoBehaviour
         objectiveText = MakeText(canvasGO.transform, "Objective", new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(16f, -16f), new Vector2(900f, 44f), 24, TextAnchor.UpperLeft,
             "Bhairavpur — Nilesh");
+        Shadow objSh = objectiveText.gameObject.AddComponent<Shadow>();
+        objSh.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        objSh.effectDistance = new Vector2(2f, -2f);
 
         // Subtitle (bottom-centre).
         subtitleText = MakeText(canvasGO.transform, "Subtitle", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
@@ -175,6 +274,9 @@ public class MobileControls : MonoBehaviour
         // Centre announcement (hidden).
         centerText = MakeText(canvasGO.transform, "CenterText", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
             new Vector2(0f, 60f), new Vector2(1000f, 160f), 44, TextAnchor.MiddleCenter, "");
+        Shadow ctrSh = centerText.gameObject.AddComponent<Shadow>();
+        ctrSh.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        ctrSh.effectDistance = new Vector2(3f, -3f);
         centerText.gameObject.SetActive(false);
 
         // Restart button (hidden).
@@ -196,6 +298,7 @@ public class MobileControls : MonoBehaviour
         joyRect.sizeDelta = new Vector2(210f, 210f);
         Image joyImg = joyBG.AddComponent<Image>();
         joyImg.color = new Color(1f, 1f, 1f, 0.14f);
+        ApplyUiMaterial(joyImg, false);
         joystick = joyBG.AddComponent<VirtualJoystick>();
         GameObject knob = new GameObject("Knob");
         RectTransform knobRect = knob.AddComponent<RectTransform>();
@@ -204,6 +307,7 @@ public class MobileControls : MonoBehaviour
         knobRect.sizeDelta = new Vector2(96f, 96f);
         Image knobImg = knob.AddComponent<Image>();
         knobImg.color = new Color(1f, 1f, 1f, 0.35f);
+        ApplyUiMaterial(knobImg, false);
 
         // Buttons (right side).
         Button actionBtn = MakeButton(canvasGO.transform, "ActionBtn", "ACTION",
@@ -240,11 +344,17 @@ public class MobileControls : MonoBehaviour
         Text t = go.AddComponent<Text>();
         t.font = GetFont();
         t.fontSize = fontSize;
+        t.fontStyle = FontStyle.Bold;
         t.alignment = align;
         t.color = Color.white;
         t.text = content;
         t.horizontalOverflow = HorizontalWrapMode.Wrap;
         t.verticalOverflow = VerticalWrapMode.Overflow;
+        ApplyUiMaterial(t, true);
+        if (t.font == null)
+        {
+            Debug.LogError("[MobileControls] UI font is NULL for text '" + name + "' — labels will be invisible!");
+        }
         return t;
     }
 
@@ -260,6 +370,7 @@ public class MobileControls : MonoBehaviour
         rt.sizeDelta = size;
         Image img = go.AddComponent<Image>();
         img.color = kBtnColor;
+        ApplyUiMaterial(img, false);
         Button b = go.AddComponent<Button>();
         b.targetGraphic = img;
 
@@ -273,9 +384,14 @@ public class MobileControls : MonoBehaviour
         Text t = labelGO.AddComponent<Text>();
         t.font = GetFont();
         t.fontSize = fontSize;
+        t.fontStyle = FontStyle.Bold;
         t.alignment = TextAnchor.MiddleCenter;
         t.color = Color.white;
         t.text = label;
+        ApplyUiMaterial(t, true);
+        Shadow ls = labelGO.AddComponent<Shadow>();
+        ls.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        ls.effectDistance = new Vector2(2f, -2f);
         return b;
     }
 

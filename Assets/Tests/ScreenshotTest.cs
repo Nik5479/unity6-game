@@ -81,6 +81,38 @@ public class ScreenshotTest
         Debug.Log("[Test] Visible UI buttons: " + visibleButtons);
         Assert.GreaterOrEqual(visibleButtons, 3, "Fewer than 3 visible UI buttons");
 
+        // (c2) Buttons must have readable labels: non-empty Text, a real
+        // font assigned, and an Image material using the UI/Default shader.
+        // (Run #16/#17 on the phone showed solid magenta blocks because
+        // the UI shader was stripped from the build.)
+        int labeledButtons = 0;
+        foreach (UnityEngine.UI.Button b in buttons)
+        {
+            if (!b.gameObject.activeInHierarchy) continue;
+            UnityEngine.UI.Text label = b.GetComponentInChildren<UnityEngine.UI.Text>(true);
+            UnityEngine.UI.Image img = b.GetComponent<UnityEngine.UI.Image>();
+            string labelText = (label != null) ? label.text : "";
+            string shaderName = (img != null && img.material != null && img.material.shader != null)
+                ? img.material.shader.name : "<none>";
+            Debug.Log("[Test] Button '" + b.name + "' label='" + labelText + "' font="
+                + ((label != null && label.font != null) ? "OK" : "NULL") + " shader=" + shaderName);
+            if (label != null && !string.IsNullOrEmpty(labelText) && label.font != null
+                && img != null && img.material != null && img.material.shader != null
+                && img.material.shader.name.Contains("UI/Default"))
+            {
+                labeledButtons++;
+            }
+        }
+        Assert.GreaterOrEqual(labeledButtons, 3, "Fewer than 3 buttons with readable labels + UI/Default material");
+
+        // (c3) Nilesh must be a clothed humanoid, not the old dark capsule.
+        GameObject head = GameObject.Find("Player/Figure/Head");
+        Assert.IsNotNull(head, "Player figure Head not found — humanoid figure did not build");
+        GameObject pagdi = GameObject.Find("Player/Figure/Pagdi");
+        Assert.IsNotNull(pagdi, "Player figure Pagdi not found — humanoid figure did not build");
+        GameObject torso = GameObject.Find("Player/Figure/Torso");
+        Assert.IsNotNull(torso, "Player figure Torso not found — humanoid figure did not build");
+
         // Screenshot 1: day view from the gameplay camera.
         string shot1 = RenderScreenshot(cam, "main-scene.png", 1280, 720);
         Assert.IsNotNull(shot1, "Screenshot 1 failed to render");
