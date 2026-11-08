@@ -1,65 +1,100 @@
-# Emulator visual check — runs the released APK on GitHub's free computer
-# (ubuntu-latest runner, KVM on, Android 11 x86_64 emulator, 4 GB RAM,
-# headless -no-window), installs the APK, launches it and takes screenshots.
-# Same approach the other Muse uses — our own machine has no KVM/GPU, so the
-# visual check happens here instead of on the phone.
+# Emulator gameplay test — installs the APK from a "Build Android APK" run on
+# a GitHub-hosted x86_64 Android 11 emulator (KVM on, landscape 1280x720),
+# launches THE FORGOTTEN VILLAGE, plays it with scripted adb input
+# (joystick walk, camera drag, TORCH / RUN / ACTION / JUMP), records the
+# screen (2 x ~30 s mp4), takes screenshots every ~4 s, saves logcat and
+# fails on a crash / dead process / black screen.
 #
-# How to run: GitHub repo -> Actions -> "Emulator test (APK visual check)"
-# -> Run workflow -> pick the release tag (e.g. v1.0.3) -> Run.
-# Screenshots land in the run's artifacts as emulator-shots-<tag>.
+# Runs automatically after every successful "Build Android APK" run, or by
+# hand: Actions -> "Emulator test (gameplay)" -> Run workflow (optionally
+# give a build run id; empty = latest successful build with an APK).
+# Results: run page -> Artifacts -> emulator-gameplay-<build run id>.
 
-name: Emulator test (APK visual check)
+name: Emulator test (gameplay)
 
 on:
   workflow_dispatch:
     inputs:
-      apk_tag:
-        description: 'Release tag to test (e.g. v1.0.3)'
-        required: true
-        default: 'v1.0.3'
+      build_run_id:
+        description: 'Build Android APK run id to test (empty = latest successful build)'
+        required: false
+        default: ''
+  workflow_run:
+    workflows: ['Build Android APK']
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   emulator-test:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: read
+    timeout-minutes: 75
     steps:
-      - name: Download APK from release
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+
+      - name: Pick the build run
+        id: rid
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_ID: ${{ inputs.build_run_id }}
+          WR_ID: ${{ github.event.workflow_run.id }}
         run: |
-          gh release download "${{ inputs.apk_tag }}" --repo Nik5479/unity6-game --pattern 'unity6-game.apk'
-          ls -lh unity6-game.apk
-          file unity6-game.apk
+          id="${INPUT_ID:-$WR_ID}"
+          if [ -z "$id" ]; then
+            for r in $(gh api "repos/${{ github.repository }}/actions/workflows/build-android.yml/runs?status=success&per_page=20" -q '.workflow_runs[].id'); do
+              n=$(gh api "repos/${{ github.repository }}/actions/runs/$r/artifacts" -q '[.artifacts[] | select(.name=="APK" and .expired==false)] | length')
+              if [ "$n" -gt 0 ]; then id=$r; break; fi
+            done
+          fi
+          [ -z "$id" ] && { echo "No successful build run with an APK artifact found"; exit 1; }
+          echo "Testing APK from build run $id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
 
-      - name: Install APK on emulator and take screenshots
+      - uses: actions/download-artifact@v4
+        with:
+          name: APK
+          run-id: ${{ steps.rid.outputs.id }}
+          github-token: ${{ github.token }}
+          path: apk
+
+      - run: ls -lh apk
+
+      # Without this the runner user can't open /dev/kvm, the emulator falls
+      # back to "-accel off" (pure software) and never finishes booting.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Boot emulator, install, play, record
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
-          target: google_apis_playstore
+          target: google_apis
           arch: x86_64
+          cores: 3
           ram-size: 4096M
-          heap-size: 512M
-          disk-size: 4096M
-          emulator-options: -no-window -no-snapshot -no-audio -gpu swiftshader_indirect -no-boot-anim
+          heap-size: 576M
+          disk-size: 8G
+          emulator-boot-timeout: 900
+          # 720x1280 panel (default AVD is only 320x640).
+          pre-emulator-launch-script: |
+            printf 'hw.lcd.width=720\nhw.lcd.height=1280\nhw.lcd.density=320\nhw.keyboard=no\n' >> ~/.android/avd/test.avd/config.ini
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: |
-            echo "--- installing APK (460 MB, takes a while) ---"
-            adb install -r -g unity6-game.apk
-            echo "--- launching game ---"
-            adb shell am start -n com.nik.forgottenvillage/com.unity3d.player.UnityPlayerActivity
-            echo "--- waiting for village to build (slow on emulator) ---"
-            sleep 300
-            adb exec-out screencap -p > shot-1.png
-            sleep 60
-            adb exec-out screencap -p > shot-2.png
-            ls -lh *.png
+          script: bash .github/scripts/emulator-play.sh
 
-      - name: Upload screenshots
+      - name: Upload video, screenshots, logcat
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emulator-shots-${{ inputs.apk_tag }}
-          path: '*.png'
+          name: emulator-gameplay-${{ steps.rid.outputs.id }}
+          path: emu-out/
+          if-no-files-found: warn
           retention-days: 7

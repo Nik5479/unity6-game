@@ -3,9 +3,20 @@ name: Build Android APK
 on:
   push:
     branches: [main]
+    # Docs-only and emulator-test-only pushes don't need a 30-min Unity build.
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/emulator-test.yml'
+      - '.github/scripts/**'
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      development:
+        description: 'Development build (extra logging in logcat)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -59,11 +70,19 @@ jobs:
           targetPlatform: Android
           unityVersion: 6000.3.28f1
           allowDirtyBuild: true
+          # Our own build method: signs with the stable keystore when it exists
+          # (local machine), otherwise with Unity's auto debug key (CI).
+          # Without this the default GameCI builder used
+          # androidUseCustomKeystore: 1 from ProjectSettings with no keystore
+          # file / passwords -> "Can not sign the application".
+          buildMethod: BuildScript.BuildAndroid
+          customParameters: ${{ inputs.development && '-devBuild' || '' }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: APK
-          path: build/Android
+          path: build/Android/*.apk
+          if-no-files-found: error
           retention-days: 2
 
       - name: Upload screenshots

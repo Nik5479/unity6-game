@@ -88,13 +88,47 @@ GitHub Actions (`.github/workflows/build-android.yml`, Unity `6000.3.28f1`):
 2. **Docker prune** — frees disk before the builder (the Unity image is
    re-pulled for the build step).
 3. **Build** — `game-ci/unity-builder@v4`, `targetPlatform: Android`,
-   scenes from `ProjectSettings/EditorBuildSettings.asset`
-   (class `!u!1045`, scene GUID must match `Assets/Scenes/Main.unity.meta`),
-   uploads the APK as artifact `APK` (`build/Android`).
+   `buildMethod: BuildScript.BuildAndroid` (builds `Assets/Scenes/Main.unity`
+   to `build/Android/unity6-game.apk`), uploads the APK as artifact `APK`.
+   Signing: the stable keystore is used only where it exists (local
+   machine); on CI it is absent, so Unity's auto debug key signs the APK.
+   A CI APK therefore can't be installed *over* a locally-signed install
+   on a phone — uninstall first. Manual runs can tick *Development build*.
 
 Unity does NOT run on this machine — the build runs on GitHub's runner
 with a ready Unity image. **Do not spam builds**: repeated failed
 activations can trigger a Unity 1-hour lockout. One push = one build.
+
+## Emulator test
+
+`.github/workflows/emulator-test.yml` + `.github/scripts/emulator-play.sh`
+play the game on a real Android emulator on GitHub's runner.
+
+**How to run**
+- Automatic: runs after every successful *Build Android APK* run, on that run's APK.
+- By hand: Actions → **Emulator test (gameplay)** → Run workflow. Leave
+  *build_run_id* empty for the latest successful build that still has an
+  `APK` artifact (APK artifacts expire after 2 days), or paste a build run id.
+
+**What it does** — Android 11 (API 30) x86_64 `google_apis` emulator,
+KVM enabled, 720×1280 panel rotated to landscape, 3 cores / 4 GB RAM.
+Installs the APK, launches `com.nik.forgottenvillage`, waits (max 7 min)
+for the `[Village] Village: N objects built` log line, then plays with
+`adb shell input`: joystick hold-walk (~11 s + 8 s + 6 s), right-side
+camera drags, TORCH tap ×2, RUN hold, ACTION tap ×2, JUMP tap. Button
+positions come from `MobileControls.cs` (1280×720 reference, scaled to the
+screen). adb can only do one finger, so RUN+walk at the same time isn't tested.
+
+**What it records**
+- `play-1.mp4` (30 s: walking + camera) and `play-2.mp4` (28 s: buttons) — ≤ 60 s total
+- `shot-00-load-*.png` while loading, `shot-NN-play.png` every ~4 s while playing, `shot-99-final.png`
+- `logcat-full.txt`, `logcat-unity.txt` (filtered), `logcat-crash.txt`, `result.txt` (step log + verdict)
+
+The job **fails** if the install fails, the game process dies, the crash
+buffer has a fatal error for the game, or the gameplay screenshots look black.
+
+**Where the artifacts are** — the run's page → *Artifacts* →
+`emulator-gameplay-<build run id>` (kept 7 days).
 
 ## Secrets — REQUIRED (already set in the repo)
 
