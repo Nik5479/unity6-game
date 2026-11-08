@@ -242,10 +242,13 @@ public class DayNightCycle : MonoBehaviour
         if (skybox != null && skybox.HasProperty("_Exposure"))
         {
             float lum = 0.2126f * sky.r + 0.7152f * sky.g + 0.0722f * sky.b;
-            // Lighting pass: night exposure 1.65 (was 1.5) — the night sky
-            // reads deep blue, not black, so the moon and haze show.
-            // Day sky (lum ~0.76) -> exposure 2.75; night sky (lum ~0.03) -> 1.65.
-            skybox.SetFloat("_Exposure", 1.9f + Mathf.Clamp01(lum / 0.8f) * 1.1f);
+            // PILOT ROUND 2: the moonless-HDRI night sky rendered pale
+            // grey-white (sampled (200,200,200) in the CI night shot) —
+            // the old 1.9 base exposure blew the night HDRI out. Now 0.8
+            // so the night reads dark blue with stars, like the
+            // reference. (Day uses the procedural skybox branch above,
+            // so this only touches dusk/night.)
+            skybox.SetFloat("_Exposure", 0.8f + Mathf.Clamp01(lum / 0.8f) * 1.1f);
         }
     }
 

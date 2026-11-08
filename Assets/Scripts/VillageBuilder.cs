@@ -990,7 +990,12 @@ public class VillageBuilder : MonoBehaviour
         }
         Material m = new Material(s);
         m.name = "WaterPuddle";
-        m.color = new Color(0.55f, 0.63f, 0.72f, 0.5f);
+        // PILOT ROUND 2: the first water (pale 0.55,0.63,0.72 @ 0.5 alpha,
+        // smoothness 1.0) read as flat grey pancakes — too pale, too
+        // uniform, too opaque. Now deeper sky-blue, more transparent so
+        // the mud shows through, less mirror (0.65) so it glints instead
+        // of glaring white.
+        m.color = new Color(0.30f, 0.42f, 0.55f, 0.38f);
         m.SetFloat("_Mode", 3f);
         m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
         m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
@@ -1003,8 +1008,8 @@ public class VillageBuilder : MonoBehaviour
         m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
         m.renderQueue = 3000;
         m.SetFloat("_Metallic", 0f);
-        m.SetFloat("_Glossiness", 1f);
-        m.SetFloat("_Smoothness", 1f);
+        m.SetFloat("_Glossiness", 0.65f);
+        m.SetFloat("_Smoothness", 0.65f);
         Texture2D ripple = LoadTex("brown_mud_dry_nor_gl_1k");
         if (ripple != null)
         {
@@ -1307,9 +1312,11 @@ public class VillageBuilder : MonoBehaviour
         };
         for (int i = 0; i < puddleSpots.Length; i++)
         {
-            float r = 0.8f + (i % 4) * 0.2f;
+            // PILOT ROUND 2: smaller (0.6-1.1 m) and more irregular — the
+            // 0.8-1.4 m discs read as perfect grey pancakes.
+            float r = 0.6f + (i % 4) * 0.17f;
             GameObject puddle = Cylinder("WaterPuddle", puddleSpots[i],
-                new Vector3(r, 0.02f, r * (0.7f + (i % 2) * 0.25f)), waterMat, villageRoot);
+                new Vector3(r, 0.02f, r * (0.55f + (i % 2) * 0.2f)), waterMat, villageRoot);
             puddle.transform.rotation = Quaternion.Euler(0f, (i * 53) % 180f, 0f);
             Destroy(puddle.GetComponent<Collider>());
         }
@@ -1378,6 +1385,10 @@ public class VillageBuilder : MonoBehaviour
             float s = 1.8f + (i % 4) * 0.33f;
             float t = s / 2.5f;
             Material patchMat = CloneTiledMaterial(pm, t);
+            // PILOT ROUND 2: full-strength patch textures read as pale
+            // slabs with hard rectangular edges — darken toward the
+            // ground tone so the edges blend.
+            if (patchMat != null) patchMat.color = patchMat.color * 0.8f;
             GameObject patch = Box("GroundPatch", new Vector3(patchSpots[i].x, 0.04f, patchSpots[i].z),
                 new Vector3(s, 0.04f, s * (0.8f + (i % 3) * 0.15f)), patchMat, villageRoot);
             patch.transform.rotation = Quaternion.Euler(0f, (i * 37) % 180f, 0f);
@@ -1673,7 +1684,11 @@ public class VillageBuilder : MonoBehaviour
         // old pointed hut until the round-2 hut arrives — every house
         // must be different.
         yield return BuildRealHouse("House_3", "thatched_hut_stealth86_50k.glb",
-            new Vector3(-9f, 0f, -9f), -10f, 3.5f);
+            new Vector3(-9f, 0f, -9f), -10f, 3.5f,
+            g => WeatherHutPlaster(g)); // PILOT ROUND 2: same orange-wall
+            // defect as House_Player (identical material layout: walls =
+            // Material.002, thatch = Material.001) — the fix-round angle2
+            // shot proves House_3's walls were still orange-red.
         // Follow-up 2026-11-07: traditional ROUND thatched hut, decimated
         // 149k -> 50k tris (full PBR). Round silhouette, genuinely different
         // from House_3's gabled stealth86 hut.
@@ -2208,25 +2223,21 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(14f, 0f, 12f), 30f, 2.5f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
             ApplyTractorPbr);
-        // Fix-push P2-14: hero's broken-down car (rusty old car, once only,
-        // at the north village edge by the gate — agreed story override of
-        // the low-poly rule).
-        // Replacement 2026-11-07: Hindustan Ambassador, 12.3k tris, FULL
-        // PBR — but CLEAN, no rust. Rust/weathering is applied in code
-        // (WeatherAmbassador: mud detail maps + darkened paint) so it
-        // still reads as the broken-down car from the story.
-        // Placement fix 2026-11-07: the car sat at (5, 18.5) — ON the
-        // east fence line (x=5.5, z 8.7-20.3), the fence rail passing
-        // through it. Now (2.5, 15): in the south lane by the gate, clear
-        // of the fence (east edge ~4.3 < 5.5) and of the gate (z <= 18.6).
-        // Phase 2: the car moves from (1, 16) to (2.5, 15) — further
-        // from the east fence AND the gate, and clear of the palm's new
-        // spot (-1, 16.5) and the GateLantern's light. It stays the
-        // hero's broken-down Ambassador (story car, not clutter).
-        yield return LoadProp("hindustan_ambassador_4_rh04.glb", "HeroCar",
-            new Vector3(2.5f, 0f, 15f), 30f, 1.5f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
-            WeatherAmbassador);
+        // PILOT ROUND 2 — HeroCar REMOVED (BLOCKER, see report): the
+        // wheel fix worked (dark rubber) and the 2.2x blow-out is gone,
+        // but the CI close-up proves the RED doors + ORANGE front are
+        // painted in the body texture itself (blinn1: one material for
+        // body + wheels, one texture). Code cannot repaint one part of a
+        // shared texture, so the toy-painted car is OUT until a proper
+        // replacement arrives (clean cream/white Ambassador, separate
+        // wheel/body materials or a plain paint texture, ~8-40k tris,
+        // full PBR). The story beat (car breaks down at the gate) stays
+        // in the GDD; the car returns with the replacement model.
+        // (Load disabled 2026-11-08; WeatherAmbassador kept for reuse.)
+        // yield return LoadProp("hindustan_ambassador_4_rh04.glb", "HeroCar",
+        //     new Vector3(2.5f, 0f, 15f), 30f, 1.5f,
+        //     GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
+        //     WeatherAmbassador);
         // Ancient gate at the north lane entrance — no collider, so the
         // player can walk through the arch.
         yield return LoadProp("ancient_gate_11_4q5m.glb", "Gate",
@@ -2461,7 +2472,10 @@ public class VillageBuilder : MonoBehaviour
                 if (m.name == "Material.001")
                 {
                     ToUrpLit(m);
-                    m.SetColor("_BaseColor", new Color(0.78f, 0.72f, 0.60f));
+                    // PILOT ROUND 2: the first tint (0.78,0.72,0.60) was
+                    // still pale enough to read as a white sheet at
+                    // distance — deepened to a real dhoti cream/tan.
+                    m.SetColor("_BaseColor", new Color(0.60f, 0.53f, 0.42f));
                     m.SetFloat("_Smoothness", 0.55f);
                     if (normal != null)
                     {
