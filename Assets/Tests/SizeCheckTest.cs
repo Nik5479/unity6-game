@@ -97,9 +97,14 @@ public class SizeCheckTest
             float h = b.size.y;
             Debug.Log("[SizeCheck] " + lm.goName + " height: " + h
                 + " m (expected " + lm.minH + "-" + lm.maxH + ")");
-            Assert.GreaterOrEqual(h, lm.minH,
+            // Tolerance 0.05 m: rendered bounds are float32 sums over
+            // transformed vertices, so a model normalised to exactly
+            // 10 m reads back as 9.999998 m (seen 2026-11-08 — the first
+            // run failed the Temple on 2 micrometres). 5 cm is far below
+            // any scale error a human could see.
+            Assert.GreaterOrEqual(h, lm.minH - 0.05f,
                 lm.goName + " is too short: " + h + " m (expected >= " + lm.minH + ")");
-            Assert.LessOrEqual(h, lm.maxH,
+            Assert.LessOrEqual(h, lm.maxH + 0.05f,
                 lm.goName + " is too tall: " + h + " m (expected <= " + lm.maxH + ")");
 
             // Pose: player 2.2 m clear of the footprint on the
