@@ -3270,7 +3270,7 @@ public class VillageBuilder : MonoBehaviour
         GameObject demon = null;
         yield return GltfModelLoader.LoadModel(
             "helldemon_reborn_16_sr87.glb", villageRoot, "Monster",
-            new Vector3(-2f, 0f, -19f), 0f, 2.3f,
+            MonsterKnock.kLair, 0f, 2.3f,
             GltfModelLoader.NormalizeMode.ByHeight,
             GltfModelLoader.ColliderMode.None, g => demon = g);
         if (demon == null)
@@ -3293,7 +3293,9 @@ public class VillageBuilder : MonoBehaviour
         // leaves the demon a silhouette (dark albedo, ~3.2 m to the
         // chest). Raised to 6.0 and moved closer/lower (-2, 2.0, -18)
         // so it hits the chest and face directly (2026-11-07).
-        AddPointLight("MonsterLight", new Vector3(-2f, 2f, -18f),
+        // OVERNIGHT R3c: the light follows the lair (see MonsterKnock) —
+        // same 1 m-north offset as the old (-2,2,-18) light over (-2,-19).
+        AddPointLight("MonsterLight", MonsterKnock.kLair + new Vector3(0f, 2f, 1f),
             new Color(0.55f, 0.65f, 1.0f), 6.0f, 9f);
     }
 
@@ -3308,7 +3310,7 @@ public class VillageBuilder : MonoBehaviour
         }
         GameObject m = new GameObject("Monster");
         m.transform.SetParent(villageRoot, false);
-        m.transform.position = new Vector3(-2f, 0f, -19f);
+        m.transform.position = MonsterKnock.kLair;
 
         GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         body.name = "MonsterBody";

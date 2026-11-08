@@ -8,9 +8,22 @@ using UnityEngine;
 /// - Door LOCKED: monster gives up, walks away, dawn = survived.
 /// - Door open / unlocked: monster forces it open and enters = game over.
 /// - Player outside the house while the monster is out: it chases.
+/// OVERNIGHT R3c — LAIR MOVED: the monster used to appear at (-2,-19),
+/// the jungle edge south of the Temple. That spot is INSIDE the Temple's
+/// FullBounds collider, and the south is sealed by overlapping building
+/// footprints (School / House_3 / Temple / House_6) — the R2+R3b CI tests
+/// proved NO walkable path exists from (-2,-19) to the door even on a
+/// 0.5 m A* grid, so the monster could only ever reach the door by
+/// clipping through walls. The lair is now (-3.5,-10.5), the open temple
+/// approach north of the seal: still south, still dark, and the walk to
+/// the door runs down the open lane where the player can see it coming.
+/// (The seal itself is a layout defect for a future pass — see
+/// VillagePathfinder.LogMap — not something a spawn point should hide.)
 /// </summary>
 public class MonsterKnock : MonoBehaviour
 {
+    // The monster's lair (spawn + retreat point). See the class comment.
+    public static readonly Vector3 kLair = new Vector3(-3.5f, 0f, -10.5f);
     public Transform monster;
     public DoorController door;
     public Transform doorFront;
@@ -80,7 +93,7 @@ public class MonsterKnock : MonoBehaviour
             if (stage == 1)
             {
                 monster.gameObject.SetActive(true);
-                monster.position = new Vector3(-2f, 0f, -19f);
+                monster.position = kLair;
             }
             chaseMode = true;
             MonsterOutside = true;
@@ -100,7 +113,7 @@ public class MonsterKnock : MonoBehaviour
             if (t > 6f)
             {
                 monster.gameObject.SetActive(true);
-                monster.position = new Vector3(-2f, 0f, -19f);
+                monster.position = kLair;
                 stage = 2;
                 t = 0f;
                 if (GameManager.Instance != null)
@@ -232,7 +245,7 @@ public class MonsterKnock : MonoBehaviour
         else if (stage == 5)
         {
             // Walk back into the dark jungle and vanish.
-            Vector3 target = new Vector3(-2f, 0f, -21f);
+            Vector3 target = kLair;
             WalkToward(target, 1.8f);
             if (Vector3.Distance(Flat(monster.position), Flat(target)) < 0.6f)
             {

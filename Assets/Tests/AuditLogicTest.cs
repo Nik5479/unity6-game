@@ -198,10 +198,16 @@ public class AuditLogicTest
         else Debug.Log("[Audit] Moon object NOT FOUND by name");
 
         // ---- OVERNIGHT R2: monster pathfinding (audit 4.6b / 6.5) ----
-        // A path from the monster's jungle spawn (-2,-19) to the player
-        // house door front must exist AND every waypoint must be walkable
-        // (CanMoveTo, same probe height the pathfinder uses) — the old
-        // straight-line walk cut straight through walls and houses.
+        // A path from the monster's lair to the player house door front
+        // must exist AND every waypoint must be walkable (CanMoveTo, same
+        // probe height the pathfinder uses) — the old straight-line walk
+        // cut straight through walls and houses.
+        // OVERNIGHT R3c: the lair moved from (-2,-19) to (-3.5,-10.5)
+        // (MonsterKnock.kLair) — (-2,-19) is inside the Temple's
+        // FullBounds collider and the south is sealed by overlapping
+        // building footprints, so no path existed from there even on a
+        // 0.5 m grid (R2+R3b CI proved it). The new lair is the open
+        // temple approach north of the seal.
         System.Type pfType = GetGameType("VillagePathfinder");
         if (pfType == null)
         {
@@ -212,7 +218,7 @@ public class AuditLogicTest
             MethodInfo findPath = pfType.GetMethod("FindPath", BindingFlags.Public | BindingFlags.Static);
             var outPath = new System.Collections.Generic.List<Vector3>();
             bool ok = findPath != null && (bool)findPath.Invoke(null,
-                new object[] { new Vector3(-2f, 0f, -19f), doorFrontPos, 0.45f, outPath });
+                new object[] { new Vector3(-3.5f, 0f, -10.5f), doorFrontPos, 0.45f, outPath });
             Debug.Log("[Audit] R2 pathfinder: found=" + ok + " waypoints=" + outPath.Count);
             int bad = 0;
             foreach (Vector3 wp in outPath)
@@ -220,7 +226,15 @@ public class AuditLogicTest
                 if (!CanMoveTo(new Vector3(wp.x, 1.0f, wp.z), 0.45f)) bad++;
             }
             Debug.Log("[Audit] R2 pathfinder: unwalkable waypoints=" + bad);
-            Assert.IsTrue(ok, "No path from monster spawn to door front — monster cannot reach the door without clipping");
+            if (!ok)
+            {
+                // Name the seal: print the blocked-cell map so the next
+                // fix knows exactly which footprints close the route.
+                MethodInfo logMap = pfType.GetMethod("LogMap", BindingFlags.Public | BindingFlags.Static);
+                if (logMap != null)
+                    logMap.Invoke(null, new object[] { new Vector3(-3.5f, 0f, -10.5f), doorFrontPos, 0.45f });
+            }
+            Assert.IsTrue(ok, "No path from monster lair to door front — monster cannot reach the door without clipping");
             Assert.AreEqual(0, bad, "Pathfinder returned unwalkable waypoints (would clip walls)");
         }
 

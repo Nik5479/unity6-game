@@ -95,6 +95,31 @@ public static class VillagePathfinder
         return VillageColliders.CanMoveTo(flatB, radius);
     }
 
+    /// <summary>Debug: log an ASCII map of blocked cells (x -14..14,
+    /// z -21..10, 1 m sampling; .=free #=blocked) plus the start/goal
+    /// cell status, so a "no path" failure names the seal instead of
+    /// just failing. Called by the audit test when FindPath returns
+    /// false. Uses the same CellBlocked probe A* uses, so the map is
+    /// the ground truth — renderer bounds and disabled meshes do NOT
+    /// appear here, only the registered colliders.</summary>
+    public static void LogMap(Vector3 from, Vector3 to, float radius)
+    {
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+        sb.Append("[Pathfinder] blocked map (x -14..14, z -21..10):\n");
+        for (int z = 10; z >= -21; z--)
+        {
+            sb.Append(z.ToString().PadLeft(4)).Append(' ');
+            for (int x = -14; x <= 14; x++)
+                sb.Append(CellBlocked(WorldToCell((float)x), WorldToCell((float)z), radius) ? '#' : '.');
+            sb.Append('\n');
+        }
+        Debug.Log(sb.ToString());
+        Debug.Log("[Pathfinder] start " + from + " blocked="
+            + CellBlocked(WorldToCell(from.x), WorldToCell(from.z), radius)
+            + " goal " + to + " blocked="
+            + CellBlocked(WorldToCell(to.x), WorldToCell(to.z), radius));
+    }
+
     /// <summary>Find a walkable path from -&gt;to. Waypoints are world XZ
     /// positions (y = 0). Returns false when no path exists.</summary>
     public static bool FindPath(Vector3 from, Vector3 to, float radius, List<Vector3> outPath)
