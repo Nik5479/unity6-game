@@ -87,6 +87,29 @@ public class SizeCheckTest
         Vector3 savedCamPos = cam.transform.position;
         Quaternion savedCamRot = cam.transform.rotation;
 
+        // Occluders for the pose search: every big solid object, so the
+        // camera never ends up staring at a wall instead of the landmark
+        // (first run: House_5's shot was blocked by the player's hut,
+        // the cow's by House_2). Buildings block the player/camera
+        // positions too; trees only block the view ray (you can stand
+        // under a canopy, you just can't see through it).
+        System.Collections.Generic.List<Bounds> occluders = new System.Collections.Generic.List<Bounds>();
+        System.Collections.Generic.List<Bounds> buildings = new System.Collections.Generic.List<Bounds>();
+        System.Collections.Generic.List<string> ocNames = new System.Collections.Generic.List<string>();
+        string[] occluderNames = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6",
+            "Temple", "Haveli", "School", "Clinic", "Tree_Banyan", "Tree_Mango", "Tree_Palm", "Tree_Neem1", "Gate" };
+        string[] buildingNames = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6",
+            "Temple", "Haveli", "School", "Clinic" };
+        foreach (string n in occluderNames)
+        {
+            GameObject o = GameObject.Find(n);
+            Bounds ob;
+            if (o == null || !TryRenderedBounds(o, out ob)) continue;
+            occluders.Add(ob);
+            ocNames.Add(n);
+            if (System.Array.IndexOf(buildingNames, n) >= 0) buildings.Add(ob);
+        }
+
         foreach (Landmark lm in kLandmarks)
         {
             GameObject go = GameObject.Find(lm.goName);
@@ -107,24 +130,59 @@ public class SizeCheckTest
             Assert.LessOrEqual(h, lm.maxH + 0.05f,
                 lm.goName + " is too tall: " + h + " m (expected <= " + lm.maxH + ")");
 
-            // Pose: player 2.2 m clear of the footprint on the
-            // village-centre side, facing the object; camera behind the
-            // player (further from the object, 3.2 m + 0.25 m per metre
-            // of object height so tall objects still fit the frame).
+            // Pose: player 2.2 m clear of the footprint, facing the
+            // object; camera behind the player (further from the object,
+            // 3.2 m + 0.25 m per metre of object height so tall objects
+            // still fit the frame). Try the village-centre side first,
+            // then the other three sides: the centre side can be blocked
+            // by another building between the camera and the target, and
+            // a blocked shot proves nothing. A side is usable when the
+            // player and camera stand clear of every building and the
+            // view ray reaches the target without crossing any occluder.
             Vector3 toCentre = new Vector3(-b.center.x, 0f, -b.center.z);
             if (toCentre.sqrMagnitude < 0.01f) toCentre = Vector3.forward;
             toCentre.Normalize();
             float clear = Mathf.Max(b.extents.x, b.extents.z) + 2.2f;
-            Vector3 playerPos = b.center + toCentre * clear;
-            playerPos.y = 0.5f;
+            float camDist = 3.2f + h * 0.25f;
+            Vector3 playerPos = Vector3.zero;
+            Vector3 camPos = Vector3.zero;
+            Vector3 lookTarget = Vector3.zero;
+            int usedSide = -1;
+            for (int side = 0; side < 4 && usedSide < 0; side++)
+            {
+                Vector3 dir = Quaternion.Euler(0f, side * 90f, 0f) * toCentre;
+                Vector3 pp = b.center + dir * clear;
+                pp.y = 0.5f;
+                Vector3 cp = pp + dir * camDist + new Vector3(0f, 1.7f, 0f);
+                Vector3 chest = pp + new Vector3(0f, 1.2f, 0f);
+                Vector3 objPoint = new Vector3(b.center.x, b.min.y + h * 0.35f, b.center.z);
+                Vector3 lt = (chest + objPoint) * 0.5f;
+                if (!PoseClear(pp, cp, lt, lm.goName, buildings, occluders, ocNames)) continue;
+                playerPos = pp;
+                camPos = cp;
+                lookTarget = lt;
+                usedSide = side;
+            }
+            if (usedSide < 0)
+            {
+                // No clear side found — fall back to the centre side
+                // (the old behaviour) rather than failing the test.
+                Debug.LogWarning("[SizeCheck] " + lm.goName + ": no clear side, using centre side");
+                Vector3 dir = toCentre;
+                playerPos = b.center + dir * clear;
+                playerPos.y = 0.5f;
+                camPos = playerPos + dir * camDist + new Vector3(0f, 1.7f, 0f);
+                Vector3 chest = playerPos + new Vector3(0f, 1.2f, 0f);
+                Vector3 objPoint = new Vector3(b.center.x, b.min.y + h * 0.35f, b.center.z);
+                lookTarget = (chest + objPoint) * 0.5f;
+                usedSide = 0;
+            }
+            Debug.Log("[SizeCheck] " + lm.goName + " pose side " + usedSide
+                + " player=" + playerPos + " cam=" + camPos);
             player.transform.position = playerPos;
             player.transform.LookAt(new Vector3(b.center.x, playerPos.y, b.center.z));
-            float camDist = 3.2f + h * 0.25f;
-            Vector3 camPos = playerPos + toCentre * camDist + new Vector3(0f, 1.7f, 0f);
             cam.transform.position = camPos;
-            Vector3 playerChest = playerPos + new Vector3(0f, 1.2f, 0f);
-            Vector3 objPoint = new Vector3(b.center.x, b.min.y + h * 0.35f, b.center.z);
-            cam.transform.LookAt((playerChest + objPoint) * 0.5f);
+            cam.transform.LookAt(lookTarget);
             yield return null;
             yield return null;
             string shot = RenderScreenshot(cam, "size-" + lm.slug + ".png", 960, 540);
@@ -139,6 +197,66 @@ public class SizeCheckTest
         if (follow != null) follow.enabled = true;
         Debug.Log("[SizeCheck] All " + kLandmarks.Length + " landmarks in range, screenshots rendered");
         yield return null;
+    }
+
+    // Is this pose usable? The player and the camera must stand clear of
+    // every building (not inside one), and the view ray from the camera
+    // to the look target must not cross any occluder (the target itself
+    // is excluded — the ray ends at it). Anything wrong returns false
+    // and the caller tries the next side.
+    private static bool PoseClear(Vector3 playerPos, Vector3 camPos, Vector3 lookTarget,
+        string targetName,
+        System.Collections.Generic.List<Bounds> buildings,
+        System.Collections.Generic.List<Bounds> occluders,
+        System.Collections.Generic.List<string> ocNames)
+    {
+        foreach (Bounds b in buildings)
+        {
+            if (PointInAABBXZ(playerPos, b, 0.5f)) return false;
+            if (PointInAABBXZ(camPos, b, 0.3f)) return false;
+        }
+        for (int i = 0; i < occluders.Count; i++)
+        {
+            if (ocNames[i] == targetName) continue;
+            Bounds b = occluders[i];
+            // Pad the box a little: a ray grazing a wall still hides
+            // the target behind it.
+            Bounds padded = new Bounds(b.center, b.size + new Vector3(0.4f, 0.4f, 0.4f));
+            if (SegmentHitsAABB(camPos, lookTarget, padded)) return false;
+        }
+        return true;
+    }
+
+    // Is the point (XZ only) inside the box's footprint? Only meaningful
+    // when the point is below the box's top (a camera above a roof is
+    // fine — but our camera is at 2.2 m, below every roof here).
+    private static bool PointInAABBXZ(Vector3 p, Bounds b, float pad)
+    {
+        if (p.y > b.max.y) return false;
+        return p.x > b.min.x - pad && p.x < b.max.x + pad
+            && p.z > b.min.z - pad && p.z < b.max.z + pad;
+    }
+
+    // Does the segment a->c intersect the box? Slab method; starting
+    // inside the box counts as a hit.
+    private static bool SegmentHitsAABB(Vector3 a, Vector3 c, Bounds b)
+    {
+        Vector3 d = c - a;
+        float tmin = 0f, tmax = 1f;
+        if (!Slab(a.x, d.x, b.min.x, b.max.x, ref tmin, ref tmax)) return false;
+        if (!Slab(a.y, d.y, b.min.y, b.max.y, ref tmin, ref tmax)) return false;
+        if (!Slab(a.z, d.z, b.min.z, b.max.z, ref tmin, ref tmax)) return false;
+        return true;
+    }
+
+    private static bool Slab(float o, float d, float mn, float mx, ref float tmin, ref float tmax)
+    {
+        if (Mathf.Abs(d) < 1e-8f) return o >= mn && o <= mx;
+        float t1 = (mn - o) / d, t2 = (mx - o) / d;
+        if (t1 > t2) { float t = t1; t1 = t2; t2 = t; }
+        tmin = Mathf.Max(tmin, t1);
+        tmax = Mathf.Min(tmax, t2);
+        return tmin <= tmax;
     }
 
     // Union of every renderer bounds under go (the loader's rendered

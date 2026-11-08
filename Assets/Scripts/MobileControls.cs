@@ -277,9 +277,16 @@ public class MobileControls : MonoBehaviour
         // Objective (top-left). Phase 1 (2026-11-08): the old 900x44 box
         // at font 24 clipped long hints to one line on 20:9 phones —
         // 820x64 at font 22 gives the hint room for a second line.
+        // Pivot fix (2026-11-08, emulator final shot): MakeText leaves
+        // the default CENTRE pivot, so a top-left-anchored rect's top
+        // half sat above the screen and the objective rendered half
+        // cut off at the top edge. Pin the pivot to the top-left corner
+        // so (16,-16) is the rect's top-left and the text sits fully
+        // inside the safe area.
         objectiveText = MakeText(hudRoot, "Objective", new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(16f, -16f), new Vector2(820f, 64f), 22, TextAnchor.UpperLeft,
             "Bhairavpur — Nilesh");
+        objectiveText.rectTransform.pivot = new Vector2(0f, 1f);
         Shadow objSh = objectiveText.gameObject.AddComponent<Shadow>();
         objSh.effectColor = new Color(0f, 0f, 0f, 0.9f);
         objSh.effectDistance = new Vector2(2f, -2f);
