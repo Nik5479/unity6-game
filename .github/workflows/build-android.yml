@@ -40,8 +40,13 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: Library
-          key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
-          restore-keys: Library-Android-
+          # hashFiles over Assets/** timed out (>120 s) on the runner, so the
+          # key is the package manifest + commit; restore falls back to the
+          # newest cache with the same packages, then any Library cache.
+          key: Library-Android-${{ hashFiles('Packages/manifest.json') }}-${{ github.sha }}
+          restore-keys: |
+            Library-Android-${{ hashFiles('Packages/manifest.json') }}-
+            Library-Android-
 
       - name: Tests
         uses: game-ci/unity-test-runner@v4
