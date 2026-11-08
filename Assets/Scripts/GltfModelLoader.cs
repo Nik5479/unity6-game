@@ -158,6 +158,46 @@ public static class GltfModelLoader
         }
         return s_UrpLitShader;
     }
+    // Phase 2: leaf/flower/fruit material names (lowercased match).
+    private static bool IsLeafMaterialName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        string n = name.ToLower();
+        return n.Contains("leaf") || n.Contains("leaves") || n.Contains("frond")
+            || n.Contains("foliage") || n.Contains("flower") || n.Contains("fruit")
+            || n.Contains("petal") || n.Contains("canopy");
+    }
+
+    // Converts a transparent glTF foliage material to URP Lit with alpha
+    // cutout (see the call site). Copies base map + colour, normal and
+    // occlusion maps; metallic 0, double-sided, opaque surface with a
+    // 0.45 clip cutoff, renderQueue 2450 (alpha-test queue).
+    private static void ConvertLeafToCutout(Material m)
+    {
+        Shader lit = GetUrpLitShader();
+        if (lit == null) return;
+        Texture baseTex = m.HasProperty("baseColorTexture") ? m.GetTexture("baseColorTexture") : null;
+        Color baseCol = m.HasProperty("baseColorFactor") ? m.GetColor("baseColorFactor") : Color.white;
+        Texture normTex = m.HasProperty("normalTexture") ? m.GetTexture("normalTexture") : null;
+        Texture occTex = m.HasProperty("occlusionTexture") ? m.GetTexture("occlusionTexture") : null;
+        m.shader = lit;
+        if (baseTex != null) m.SetTexture("_BaseMap", baseTex);
+        m.SetColor("_BaseColor", baseCol);
+        if (normTex != null) m.SetTexture("_BumpMap", normTex);
+        if (occTex != null) m.SetTexture("_OcclusionMap", occTex);
+        m.SetFloat("_Metallic", 0f);
+        m.SetFloat("_Smoothness", 0.5f);
+        m.SetFloat("_Cull", 0f); // double-sided (leaf cards are single quads)
+        m.SetFloat("_Surface", 0f);
+        m.SetFloat("_AlphaClip", 1f);
+        m.SetFloat("_Cutoff", 0.45f);
+        m.SetFloat("_ZWrite", 1f);
+        m.renderQueue = 2450;
+        m.EnableKeyword("_ALPHATEST_ON");
+        m.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        m.SetOverrideTag("RenderType", "Opaque");
+    }
+
     // Loads one model. onDone(holder) — holder is null on failure.
     // Never throws. The load is sequential per call; callers yield on it.
     public static IEnumerator LoadModel(
@@ -330,6 +370,21 @@ public static class GltfModelLoader
                         m.SetFloat("_Metallic", 0f);
                     if (m.HasProperty("metallicFactor"))
                         m.SetFloat("metallicFactor", 0f);
+                    // Phase 2 leaf fix (2026-11-08): foliage materials that
+                    // arrive BLEND (transparent) sort against each other and
+                    // render dark/flat — the chinaberry leaf + flower + fruit
+                    // materials (alphaMode BLEND) and any other leaf card.
+                    // They are converted to URP Lit alpha-CUTOUT: the leaf
+                    // texture's alpha clips the quad to the leaf silhouette,
+                    // no transparency sorting, double-sided. Only leaf-named
+                    // materials that are actually transparent
+                    // (renderQueue >= 3000) are touched; opaque leaves
+                    // (mango, palm MASK) are left alone.
+                    if (m.shader != null && m.shader.name.StartsWith("Shader Graphs/glTF")
+                        && m.renderQueue >= 3000 && IsLeafMaterialName(m.name))
+                    {
+                        ConvertLeafToCutout(m);
+                    }
                     if (m.shader != null && m.shader.name == "Shader Graphs/glTF-unlit")
                     {
                         Shader unlit = GetUrpUnlitShader();

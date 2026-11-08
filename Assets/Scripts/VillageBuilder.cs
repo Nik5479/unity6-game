@@ -815,7 +815,11 @@ public class VillageBuilder : MonoBehaviour
         matGrass = LoadMaterialAsset("FieldGrass");
 
         // Fallback: rebuild any missing .mat at runtime from its texture.
-        if (matGround == null) matGround = MakeMat("GroundMud", LoadTex("ground_mud"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(5f, 5f));
+        // Phase 2 ground fix (2026-11-08): the Ground plane is Unity's
+        // 10 m Plane at scale 50 = 500 m across, so the old 5x5 tiling
+        // stretched one mud tile over 100 m and the ground read as flat
+        // beige. 200x200 = 2.5 m per tile, the mud photo's real scale.
+        if (matGround == null) matGround = MakeMat("GroundMud", LoadTex("ground_mud"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(200f, 200f));
         if (matPlaster == null) matPlaster = MakeMat("WallPlaster", LoadTex("wall_plaster"), new Color(0.92f, 0.85f, 0.72f), 0.15f, new Vector2(2f, 1.5f));
         if (matWood == null) matWood = MakeMat("WoodPlanks", LoadTex("wood_planks"), new Color(0.75f, 0.6f, 0.42f), 0.3f, new Vector2(1f, 1f));
         if (matRoof == null) matRoof = MakeMat("RoofTiles", LoadTex("roof_tiles"), new Color(0.95f, 0.8f, 0.62f), 0.25f, new Vector2(3f, 2f));
@@ -823,7 +827,9 @@ public class VillageBuilder : MonoBehaviour
         if (matGrass == null) matGrass = MakeMat("FieldGrass", LoadTex("field_grass"), new Color(0.7f, 0.8f, 0.55f), 0.05f, new Vector2(4f, 3f));
 
         // Safety net: re-assign textures by name if a loaded .mat lost its reference.
-        AssignTex(matGround, "ground_mud", new Vector2(5f, 5f));
+        // Ground tiling 200 (see above): the .mat asset itself is also
+        // re-tiled to 200, so the plane is sharp even before this runs.
+        AssignTex(matGround, "ground_mud", new Vector2(200f, 200f));
         AssignTex(matPlaster, "wall_plaster", new Vector2(2f, 1.5f));
         AssignTex(matWood, "wood_planks", new Vector2(1f, 1f));
         AssignTex(matRoof, "roof_tiles", new Vector2(3f, 2f));
@@ -846,7 +852,7 @@ public class VillageBuilder : MonoBehaviour
         matPagdi = MakeFlat("Pagdi", new Color(0.85f, 0.45f, 0.10f), 0.4f);
         matPants = MakeFlat("Pants", new Color(0.18f, 0.16f, 0.14f), 0.4f);
         matEye = MakeEmissive("MonsterEyes", new Color(0.9f, 0.85f, 0.6f), new Color(1.4f, 1.1f, 0.35f));
-        matLampGlass = MakeEmissive("LampGlass", new Color(1f, 0.85f, 0.55f), new Color(1.6f, 1.0f, 0.35f));
+        matLampGlass = MakeEmissive("LampGlass", new Color(1f, 0.85f, 0.55f), new Color(1.3f, 0.8f, 0.3f));
         matShadowBlob = MakeTransparent("ShadowBlob", new Color(0f, 0f, 0f, 0.35f));
 
         // Phase 4: Poly Haven CC0 1K textures — brick (temple), thatch
@@ -860,9 +866,13 @@ public class VillageBuilder : MonoBehaviour
             LoadTex("brick_4_nor_gl_1k"), LoadTex("brick_4_metal_smooth_1k"), LoadTex("brick_4_ao_1k"));
         matThatch = MakeMat("Thatch", LoadTex("thatch_roof_angled_diff_1k"), new Color(0.9f, 0.85f, 0.7f), 0.05f, new Vector2(2f, 2f),
             LoadTex("thatch_roof_angled_nor_gl_1k"), LoadTex("thatch_roof_angled_metal_smooth_1k"), LoadTex("thatch_roof_angled_ao_1k"));
-        matMudDry = MakeMat("MudDry", LoadTex("brown_mud_dry_diff_1k"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(2f, 2f),
+        // Phase 2: mud tiling 2 -> 3 (dirt-path boxes are ~3 m wide, so
+        // 3 repeats = ~1 m per tile, matching the ground's 2.5 m tiles);
+        // cobble 4 -> 6 (9 m chowk disc, 1.5 m per tile) + a darker tint
+        // so the stones read instead of washing out to flat beige.
+        matMudDry = MakeMat("MudDry", LoadTex("brown_mud_dry_diff_1k"), new Color(0.85f, 0.78f, 0.68f), 0.05f, new Vector2(3f, 3f),
             LoadTex("brown_mud_dry_nor_gl_1k"), LoadTex("brown_mud_dry_metal_smooth_1k"), LoadTex("brown_mud_dry_ao_1k"));
-        matCobble = MakeMat("Cobble", LoadTex("cobblestone_floor_04_diff_1k"), new Color(0.85f, 0.84f, 0.8f), 0.1f, new Vector2(4f, 4f),
+        matCobble = MakeMat("Cobble", LoadTex("cobblestone_floor_04_diff_1k"), new Color(0.72f, 0.71f, 0.68f), 0.1f, new Vector2(6f, 6f),
             LoadTex("cobblestone_floor_04_nor_gl_1k"), LoadTex("cobblestone_floor_04_metal_smooth_1k"), LoadTex("cobblestone_floor_04_ao_1k"));
         // Ground variation: leaf litter + withered grass patches scattered
         // over the village ground (real photo textures, not flat colour).
@@ -1117,23 +1127,20 @@ public class VillageBuilder : MonoBehaviour
         }
 
         // Dirt path patches along the main lane (worn ground, darker mud).
-        // Phase 4: real dry-mud texture when available, flat colour fallback.
-        // Lighting pass 2026-11-07: the old lane read as FLAT TILES — 6
-        // identical boxes in a perfect line. Now each patch varies in
-        // width/length, staggers sideways, rotates a few degrees and
-        // alternates mud/ground material, so the lane reads as a worn
-        // track, not paving.
+        // Phase 2: ALL patches use the mud material now. The old code
+        // alternated mud / ground-mud, but the two materials tile at
+        // different rates (mud 3x, ground 200x), so the lane read as a
+        // checkerboard of flat rectangles instead of one worn track.
         Material dirt = (matMudDry != null)
             ? matMudDry
             : MakeFlat("DirtPath", new Color(0.45f, 0.35f, 0.24f), 0.05f);
-        Material dirtAlt = (matGround != null) ? matGround : dirt;
         for (int i = 0; i < 6; i++)
         {
             float z = -10f + i * 4f;
             float w = 2.4f + ((i % 3) - 1) * 0.35f;
             float l = 3.4f + ((i % 2) * 0.5f);
             float x = ((i % 3) - 1) * 0.3f;
-            GameObject patch = Box("DirtPath", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), (i % 2 == 0) ? dirt : dirtAlt, villageRoot);
+            GameObject patch = Box("DirtPath", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), dirt, villageRoot);
             patch.transform.rotation = Quaternion.Euler(0f, ((i * 7) % 13) - 6f, 0f);
             Destroy(patch.GetComponent<Collider>());
         }
@@ -1147,27 +1154,55 @@ public class VillageBuilder : MonoBehaviour
             float w = 3.4f + ((i % 2) * 0.5f);
             float l = 2.4f + ((i % 3) - 1) * 0.35f;
             float z = 7f + ((i % 3) - 1) * 0.3f;
-            GameObject patchEW = Box("DirtPathEW", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), (i % 2 == 0) ? dirt : dirtAlt, villageRoot);
+            GameObject patchEW = Box("DirtPathEW", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), dirt, villageRoot);
             patchEW.transform.rotation = Quaternion.Euler(0f, ((i * 11) % 13) - 6f, 0f);
             Destroy(patchEW.GetComponent<Collider>());
         }
 
-        // Lighting pass 2026-11-07 — PUDDLES (the reference image): dark
-        // glossy discs on the chowk and lane that catch the warm lamp
-        // light and the moon — wet mud after rain. Very high smoothness
-        // (0.95) + dark blue-grey colour; the reflection probe + lamp
-        // specular make them glint instead of reading as flat paint.
-        // y=0.045 sits above the chowk (0.02) and lane patches (0.03).
-        Material puddleMat = MakeFlat("Puddle", new Color(0.07f, 0.08f, 0.11f), 0.95f);
+        // Phase 2 wet look (new night + day references, 2026-11-08): the
+        // target is a WET village road — puddles reflecting sky, lamp and
+        // moon all down the lane — not flat dry mud. Two parts:
+        // (a) a faint glossy "wet sheen" strip over each lane: a thin
+        // transparent dark layer, very high smoothness, so the sun / lamp
+        // specular streaks along the road instead of the lane reading
+        // matte. Alpha is deliberately low (0.13) — it must glint, not
+        // paint the lane black.
+        // (b) real puddles (below): dark slate discs, smoothness 0.95 +
+        // a little metal so the reflection probe + sun/lamp specular make
+        // them glint instead of reading as black holes. They sit at
+        // y=0.05, above the sheen (0.038) and the lane patches (0.03).
+        Material sheenMat = MakeTransparent("WetSheen", new Color(0.05f, 0.06f, 0.09f, 0.13f));
+        if (sheenMat != null)
+        {
+            sheenMat.SetFloat("_Smoothness", 0.9f);
+            sheenMat.SetFloat("_Glossiness", 0.9f);
+            GameObject sheenNS = Box("WetSheenNS", new Vector3(0f, 0.038f, 2f), new Vector3(2.6f, 0.01f, 24f), sheenMat, villageRoot);
+            Destroy(sheenNS.GetComponent<Collider>());
+            GameObject sheenEW = Box("WetSheenEW", new Vector3(0f, 0.038f, 7f), new Vector3(20f, 0.01f, 2.6f), sheenMat, villageRoot);
+            Destroy(sheenEW.GetComponent<Collider>());
+        }
+
+        // PUDDLES — the reference's single strongest cue: standing water
+        // all down the road, reflecting the sky by day and the lamps +
+        // moon by night. 9 discs on both lanes (was 5 small ones in the
+        // middle of the chowk, which read as black oval blobs because
+        // they were tiny, pure-black and matte). Bigger (1.6-2.65 m
+        // across), slate blue-grey instead of near-black, smoothness
+        // 0.95 and a touch of metal so the reflection probe gives them
+        // a sky sheen.
+        Material puddleMat = MakeFlat("Puddle", new Color(0.09f, 0.11f, 0.15f), 0.95f);
+        if (puddleMat != null) puddleMat.SetFloat("_Metallic", 0.2f);
         Vector3[] puddleSpots = new Vector3[]
         {
-            new Vector3(1.5f, 0.045f, 2.5f), new Vector3(3.6f, 0.045f, 0.4f),
-            new Vector3(0f, 0.045f, -4f), new Vector3(-1.6f, 0.045f, 5f),
-            new Vector3(4.2f, 0.045f, 8.2f),
+            new Vector3(0.8f, 0.05f, 2.5f), new Vector3(-0.9f, 0.05f, -4f),
+            new Vector3(1.2f, 0.05f, -8.5f), new Vector3(-0.6f, 0.05f, 10.5f),
+            new Vector3(0.5f, 0.05f, 14.5f),
+            new Vector3(3.6f, 0.05f, 0.4f), new Vector3(-4.5f, 0.05f, 7.5f),
+            new Vector3(7.5f, 0.05f, 6.8f), new Vector3(-6.5f, 0.05f, 11f),
         };
         for (int i = 0; i < puddleSpots.Length; i++)
         {
-            float r = 0.9f + (i % 3) * 0.35f;
+            float r = 1.6f + (i % 4) * 0.35f;
             GameObject puddle = Cylinder("Puddle", puddleSpots[i],
                 new Vector3(r, 0.02f, r * (0.7f + (i % 2) * 0.25f)), puddleMat, villageRoot);
             puddle.transform.rotation = Quaternion.Euler(0f, (i * 53) % 180f, 0f);
@@ -1196,9 +1231,15 @@ public class VillageBuilder : MonoBehaviour
 
         // Scattered ground variation across the village: leaf litter,
         // withered grass and dry-mud patches break up the flat brown.
+        // Phase 2: each patch gets its OWN material clone tiled to its
+        // size (tile = patch size / 2.5 m, the ground's tile size). The
+        // old code shared one material at 1x1 tiling across every patch,
+        // so a 3.7 m patch stretched one texture tile over 3.7 m and read
+        // as a flat coloured rectangle — the blotchy slabs in the Phase 1
+        // screenshot. Patches are also smaller now (1.8-2.8 m) and sit
+        // lower (y=0.04) so their edges stop reading as raised tiles.
         // Kept outside the chowk disc (r ~5) and off the dirt lanes so
-        // nothing z-fights the path/chowk patches (these sit at y=0.06,
-        // above the lane patches at 0.03 and the chowk at 0.02).
+        // nothing z-fights the path/chowk patches.
         Vector3[] patchSpots = new Vector3[]
         {
             new Vector3(-12f, 0f, -6f), new Vector3(12f, 0f, -10f),
@@ -1229,12 +1270,32 @@ public class VillageBuilder : MonoBehaviour
             Material pm = (i % 3 == 0 && matLeaves != null) ? matLeaves
                 : (i % 3 == 1 && matWitheredGrass != null) ? matWitheredGrass
                 : (matMudDry != null ? matMudDry : matGround);
-            float s = 2.2f + (i % 4) * 0.5f;
-            GameObject patch = Box("GroundPatch", new Vector3(patchSpots[i].x, 0.06f, patchSpots[i].z),
-                new Vector3(s, 0.04f, s * (0.8f + (i % 3) * 0.15f)), pm, villageRoot);
+            float s = 1.8f + (i % 4) * 0.33f;
+            float t = s / 2.5f;
+            Material patchMat = CloneTiledMaterial(pm, t);
+            GameObject patch = Box("GroundPatch", new Vector3(patchSpots[i].x, 0.04f, patchSpots[i].z),
+                new Vector3(s, 0.04f, s * (0.8f + (i % 3) * 0.15f)), patchMat, villageRoot);
             patch.transform.rotation = Quaternion.Euler(0f, (i * 37) % 180f, 0f);
             Destroy(patch.GetComponent<Collider>());
         }
+    }
+
+    // Phase 2: clone a ground material with its texture tiling scaled to
+    // the patch it covers, so a photo texture keeps the same texel density
+    // on a 2 m patch as on the 500 m ground plane. All four PBR map scales
+    // are set together — setting only the albedo scale would leave the
+    // normal/AO maps stretched differently and the patch would shade wrong.
+    private static Material CloneTiledMaterial(Material src, float tiling)
+    {
+        if (src == null) return null;
+        Material m = new Material(src);
+        m.mainTextureScale = new Vector2(tiling, tiling);
+        string[] maps = new string[] { "_BaseMap", "_BumpMap", "_MetallicGlossMap", "_OcclusionMap" };
+        foreach (string map in maps)
+        {
+            if (m.HasProperty(map)) m.SetTextureScale(map, new Vector2(tiling, tiling));
+        }
+        return m;
     }
 
     // Stray-object cleanup (runs after all models load):
@@ -1473,6 +1534,10 @@ public class VillageBuilder : MonoBehaviour
             GltfModelLoader.ColliderMode.None, g => hut = g);
         if (hut != null)
         {
+            // Phase 2: the hut's main texture reads as a flat saturated
+            // orange slab in daylight (Phase 1 screenshot). Mute it
+            // toward weathered terracotta — see MuteOrangePlaster.
+            MuteOrangePlaster(hut, "Material.002");
             Bounds hb = GetWorldBounds(hut);
             float w = hb.size.x;
             float d = hb.size.z;
@@ -1508,19 +1573,22 @@ public class VillageBuilder : MonoBehaviour
         yield return BuildRealHouse("House_4", "traditional_round_thatched_hut_50k.glb",
             new Vector3(9f, 0f, -7f), 25f, 3.5f);
         yield return BuildRealHouse("House_5", "old_village_house_-_indian_game_asset_24_bac7.glb",
-            new Vector3(-13f, 0f, 13f), -20f, 5.5f);
+            new Vector3(-13f, 0f, 13f), -20f, 5.5f,
+            g => MuteOrangePlaster(g, "Material.002"));
         yield return BuildRealHouse("House_6", "indian_village_house_famous_3d_model_37_4zjm.glb",
             new Vector3(13f, 0f, -14f), 10f, 5.5f);
     }
 
     private System.Collections.IEnumerator BuildRealHouse(
-        string name, string file, Vector3 pos, float yaw, float size)
+        string name, string file, Vector3 pos, float yaw, float size,
+        System.Action<GameObject> onLoaded = null)
     {
         GameObject h = null;
         yield return GltfModelLoader.LoadModel(
             file, villageRoot, name, pos, yaw, size,
             GltfModelLoader.NormalizeMode.ByHeight,
             GltfModelLoader.ColliderMode.FullBounds, g => h = g);
+        if (h != null && onLoaded != null) onLoaded(h);
         if (h == null)
         {
             // Primitive fallback with the same footprint.
@@ -1756,14 +1824,23 @@ public class VillageBuilder : MonoBehaviour
         // crate — water by the handpump, medicine inside Nilesh's house,
         // battery by the chowk lamp.
         waterPickup = MakePickup("Pickup_Water", new Vector3(5f, 0.3f, 10.2f), "Paani");
-        medicinePickup = MakePickup("Pickup_Medicine", new Vector3(-10.5f, 0.3f, 5f), "Dawai");
+        // Phase 2 collision fix (audit O6): the medicine crate sat ON
+        // the hospital bed ((-10.5, 5) vs bed centre (-10.5, 4.8)).
+        // Now (-8.2, 6.8): inside the house's north-east corner, clear
+        // of the bed, the table and the door swing.
+        medicinePickup = MakePickup("Pickup_Medicine", new Vector3(-8.2f, 0.3f, 6.8f), "Dawai");
         batteryPickup = MakePickup("Pickup_Battery", new Vector3(1.2f, 0.3f, 2.8f), "Battery");
 
         // Chowk lamp: pole + warm flickering point light + glow.
+        // Phase 2: the old 0.5 m emissive head read as a pale yellow
+        // cube in daylight (screenshot). Smaller glass (0.34 m) inside
+        // a dark cap + base frame, so it reads as a lantern, not a box.
         Vector3 lampPos = new Vector3(2.5f, 0f, 1.5f);
         Cylinder("LampPole", lampPos + new Vector3(0f, 1.6f, 0f), new Vector3(0.22f, 3.2f, 0.22f), matDark, villageRoot);
-        Box("LampHead", lampPos + new Vector3(0f, 3.3f, 0f), new Vector3(0.5f, 0.45f, 0.5f), matLampGlass, villageRoot);
-        GameObject bulb = Sphere("LampBulb", lampPos + new Vector3(0f, 3.28f, 0f), new Vector3(0.3f, 0.3f, 0.3f), matLampGlass, villageRoot);
+        Box("LampHead", lampPos + new Vector3(0f, 3.3f, 0f), new Vector3(0.34f, 0.3f, 0.34f), matLampGlass, villageRoot);
+        Box("LampCap", lampPos + new Vector3(0f, 3.5f, 0f), new Vector3(0.44f, 0.08f, 0.44f), matDark, villageRoot);
+        Box("LampBase", lampPos + new Vector3(0f, 3.12f, 0f), new Vector3(0.4f, 0.06f, 0.4f), matDark, villageRoot);
+        GameObject bulb = Sphere("LampBulb", lampPos + new Vector3(0f, 3.28f, 0f), new Vector3(0.22f, 0.22f, 0.22f), matLampGlass, villageRoot);
         Destroy(bulb.GetComponent<Collider>());
         GameObject lightGO = new GameObject("LampLight");
         lightGO.transform.SetParent(villageRoot, false);
@@ -1828,19 +1905,29 @@ public class VillageBuilder : MonoBehaviour
         // Phase 1 real-size table: mango 9 m, banyan 13 m, palm 10 m.
         // The old heights (6/7/5 m) made the jungle read as shrubs next
         // to the 10 m temple.
+        // Phase 2 collision fixes (audit O5/O9/O10): the mango's trunk
+        // sat 0.5 m off the clinic's west wall, the banyan's canopy
+        // overhung the haveli's north face, and the palm's trunk sat on
+        // the dock's edge. All three move clear; the mango + banyan +
+        // chinaberry leaf meshes were also restored from the original
+        // files this pass (their canopies were decimated 87-94%).
         GameObject mango = null, banyan = null, palm = null;
         yield return LoadRealTree("mango_tree_3_sl11.glb", "Tree_Mango",
-            new Vector3(-16f, 0f, -2f), 9f, GltfModelLoader.ColliderMode.Trunk, g => mango = g);
+            new Vector3(-18f, 0f, -5f), 9f, GltfModelLoader.ColliderMode.Trunk, g => mango = g);
         // Replacement 2026-11-07: Chinese Banyan, 111k tris with real
         // aerial roots (the old 3.2k-tri banyan + its 35 m base disc are gone).
         yield return LoadRealTree("chinese_banyan_ficus_microcarpa_9_tpa1.glb", "Tree_Banyan",
-            new Vector3(16f, 0f, 2f), 13f, GltfModelLoader.ColliderMode.Trunk, g => banyan = g);
+            new Vector3(19f, 0f, 5f), 13f, GltfModelLoader.ColliderMode.Trunk, g => banyan = g);
         // Replacement 2026-11-07: Realistic Palm Tree Free, 27k tris,
         // single date palm (the old 2.9k-tri cluster rendered black).
         yield return LoadRealTree("realistic_palm_tree_free_8_k8rm.glb", "Tree_Palm",
-            new Vector3(-4f, 0f, 18f), 10f, GltfModelLoader.ColliderMode.FullBounds, g => palm = g);
-        yield return LoadRealTree("trees_25_wae0.glb", "Tree_Pack",
-            new Vector3(-18f, 0f, -18f), 8f, GltfModelLoader.ColliderMode.FullBounds, null);
+            new Vector3(-1f, 0f, 16.5f), 10f, GltfModelLoader.ColliderMode.FullBounds, g => palm = g);
+        // Phase 2 REMOVED: trees_25_wae0 "Tree_Pack" (was (-18,-18), 8 m).
+        // Its three materials are flat colours with NO textures and
+        // single-sided (doubleSided=false) — a cartoon-style cluster
+        // that clashed with every PBR tree, and its spread clipped the
+        // school's corner (audit O7). The SW corner is already covered
+        // by the jungle ring; nothing replaces it.
 
         // Jungle edge: REAL tree clones ringing the village. The old
         // primitive blob trees (BuildTree) are gone — user ordered no
@@ -1924,8 +2011,24 @@ public class VillageBuilder : MonoBehaviour
     // Clone one of the loaded real trees onto the jungle-edge ring.
     // Clones share the source's meshes/materials (no extra texture
     // memory). Deterministic yaw + scale jitter so clones are not clones.
+    // Phase 2 collision fix (audit O2/O3/O4): a ring tree used to grow
+    // THROUGH the gate arch at (0, 21), two flanked the Angkor temple
+    // at (21, 12), and one stood on the dock at (-7, 19). Clones whose
+    // trunk would land inside a landmark's clearance are skipped — a
+    // missing ring tree reads as a gap in the jungle, a tree through a
+    // gateway reads as a bug.
     private void CloneRingTree(GameObject[] sources, int index, Vector3 pos)
     {
+        Vector3[] keepOut = new Vector3[]
+        {
+            new Vector3(0f, 0f, 20.5f), new Vector3(21f, 0f, 12f), new Vector3(-7f, 0f, 19f),
+        };
+        float[] keepOutR = new float[] { 3.5f, 4.5f, 4f };
+        for (int k = 0; k < keepOut.Length; k++)
+        {
+            float dx = pos.x - keepOut[k].x, dz = pos.z - keepOut[k].z;
+            if (dx * dx + dz * dz < keepOutR[k] * keepOutR[k]) return;
+        }
         GameObject src = null;
         for (int k = 0; k < sources.Length; k++)
         {
@@ -1990,8 +2093,12 @@ public class VillageBuilder : MonoBehaviour
         // Replacement 2026-11-07: Classic Tractor, 81.7k tris — good
         // geometry but ZERO textures as distributed. PBR is applied per
         // material name in code (ApplyTractorPbr) — never flat-coloured.
+        // Phase 2 collision fix (audit O11): the tractor sat at (12, 11),
+        // tangent to House_2 (9, 8) — 4.24 m apart vs a 4.25 m half-sum,
+        // its nose on the house wall. Now (14, 12): 6.4 m from House_2,
+        // 3.2 m from the goat, clear of the field's south edge (z=13).
         yield return LoadProp("classic_tractor__1__11_scro.glb", "Tractor",
-            new Vector3(12f, 0f, 11f), 30f, 2.5f,
+            new Vector3(14f, 0f, 12f), 30f, 2.5f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
             ApplyTractorPbr);
         // Fix-push P2-14: hero's broken-down car (rusty old car, once only,
@@ -2003,10 +2110,14 @@ public class VillageBuilder : MonoBehaviour
         // still reads as the broken-down car from the story.
         // Placement fix 2026-11-07: the car sat at (5, 18.5) — ON the
         // east fence line (x=5.5, z 8.7-20.3), the fence rail passing
-        // through it. Now (1, 16): in the south lane by the gate, clear
-        // of the fence (east edge 3.4 < 5.5) and of the gate (z <= 18.6).
+        // through it. Now (2.5, 15): in the south lane by the gate, clear
+        // of the fence (east edge ~4.3 < 5.5) and of the gate (z <= 18.6).
+        // Phase 2: the car moves from (1, 16) to (2.5, 15) — further
+        // from the east fence AND the gate, and clear of the palm's new
+        // spot (-1, 16.5) and the GateLantern's light. It stays the
+        // hero's broken-down Ambassador (story car, not clutter).
         yield return LoadProp("hindustan_ambassador_4_rh04.glb", "HeroCar",
-            new Vector3(1f, 0f, 16f), 30f, 1.5f,
+            new Vector3(2.5f, 0f, 15f), 30f, 1.5f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
             WeatherAmbassador);
         // Ancient gate at the north lane entrance — no collider, so the
@@ -2020,8 +2131,11 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("handpump_3d_39_aah5.glb", "Handpump",
             new Vector3(4.5f, 0f, 9f), 0f, 1.3f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+        // Phase 2 collision fix (audit O17): the matka grazed the wolf
+        // (1.12 m apart vs a 1.15 m half-sum). Now (-4.2, 9.2): 2.2 m
+        // from the wolf, 4.3 m from the chicken's new spot.
         yield return LoadProp("indian_terracotta_matka_red_clay_water_pot_40_ris7.glb", "Matka",
-            new Vector3(-5f, 0f, 8.5f), 0f, 0.5f,
+            new Vector3(-4.2f, 0f, 9.2f), 0f, 0.5f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         yield return LoadProp("rusty_and_oil_stained_oil_barrel_43_s99h.glb", "OilBarrel",
             new Vector3(7.5f, 0f, 3.5f), 0f, 0.9f,
@@ -2132,6 +2246,32 @@ public class VillageBuilder : MonoBehaviour
         m.SetFloat("_Smoothness", 0.5f);
         m.SetFloat("_Cull", 0f);
         return m;
+    }
+
+    // Phase 2: the thatched hut (House_Player) and the old village house
+    // (House_5) ship with a flat saturated orange plaster texture that
+    // reads as a bright toy slab in daylight. There is no separate wall
+    // material to swap — the whole main texture is one material — so
+    // the fix is a weathering tint on that material only (ToUrpLit first,
+    // like WeatherAmbassador): multiply the base colour down and toward
+    // grey-brown. Deliberately mild (0.78/0.74/0.68): the walls should
+    // look like weathered terracotta, not repainted grey. Verify in the
+    // CI screenshot — if the wrong house is orange, this tint is a no-op
+    // on the right one and the real culprit needs its own pass.
+    private static void MuteOrangePlaster(GameObject holder, string materialName)
+    {
+        if (holder == null) return;
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null || m.name != materialName) continue;
+                ToUrpLit(m);
+                Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : Color.white;
+                m.SetColor("_BaseColor", new Color(c.r * 0.78f, c.g * 0.74f, c.b * 0.68f, c.a));
+            }
+        }
+        Debug.Log("[Village] Orange plaster muted on " + holder.name + " (" + materialName + ")");
     }
 
     // Bullock cart: 2 materials, zero textures. Weathered wood PBR from
@@ -2385,8 +2525,13 @@ public class VillageBuilder : MonoBehaviour
         // was 3 copies of the same 2.4M-tri file; the file itself is
         // replaced with a decimated version by another worker).
         // Phase 1: a chicken is 0.45 m tall (was ByWidth 0.6 -> ~0.67 m).
+        // Phase 2 collision fix (audit O1, HIGH): the chicken stood
+        // 0.5 m from the wolf — the wolf stood on/through it. Now
+        // (-8.5, 9.5): 2.9 m from the wolf, 3.6 m from the matka, just
+        // north of Nilesh's house wall. (Matches the new night
+        // reference: chicken near the hero, left of the lane.)
         yield return LoadProp("chicken_73_eoja.glb", "Chicken_1",
-            new Vector3(-6.5f, 0f, 8f), 40f, 0.45f,
+            new Vector3(-8.5f, 0f, 9.5f), 40f, 0.45f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // yield return LoadProp("chicken_73_eoja.glb", "Chicken_2",
         //     new Vector3(7f, 0f, 5.5f), -120f, 0.6f,
@@ -2418,15 +2563,22 @@ public class VillageBuilder : MonoBehaviour
         // graves no longer overlap House_6's corner (~0.25 m before).
         // Phase 1: House_6 grew to 5.5 m tall (9 m wide), so the whole
         // cluster shifts ~0.5-1 m south-east again to stay clear of it.
+        // Phase 2 collision fix (audit O8): the pyre stood 1.58 m from
+        // the grave stones (half-sum ~2.65 m) and the fire place 0.3 m
+        // from the small grave — the whole shamshan cluster overlapped
+        // itself. Spread along the SE jungle edge: graves stay, pyre
+        // goes east (2.7 m from the graves), fire goes west (2.7 m from
+        // the small grave), small grave goes south-east (3.4 m from the
+        // graves). All clear of House_6 and the ring trunks.
         yield return LoadProp("grave_stone_collection_64_7j05.glb", "GraveStones",
             new Vector3(19.5f, 0f, -18.5f), 0f, 3.5f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         // Fix-push P2-14: shamshan pyre (woodpile) + fire, by the graves.
         yield return LoadProp("woodpile_game_ready_asset_91_qdgo.glb", "PyreWood",
-            new Vector3(19f, 0f, -20f), 20f, 1.8f,
+            new Vector3(22f, 0f, -19.5f), 20f, 1.8f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         yield return LoadProp("small_fire_place_90_23ou.glb", "ShamshanFire",
-            new Vector3(17.2f, 0f, -20.5f), 0f, 1.5f,
+            new Vector3(15f, 0f, -19.5f), 0f, 1.5f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         // Phase B: BHUMIJA SHIKARA (replacement 2026-11-07) — a real
         // 12th-century Hoysala shrine scan (150k tris, albedo-only) as the
@@ -2457,8 +2609,11 @@ public class VillageBuilder : MonoBehaviour
         // Lanterns: brass diya inside Nilesh's house, chowk lantern by the lamp.
         // Phase 1: the player's hut shrank to 4 m tall (z span 4.93-7.07),
         // so the house diya moved from z=4.5 to z=5.5 to stay inside it.
+        // Phase 2 collision fix (audit O6): the house diya stood in the
+        // bed/medicine cluster. Now the north-west corner (-10.8, 6.6):
+        // 1.8 m from the bed, inside the hut (z span 4.93-7.07).
         yield return LoadProp("brass_diya_lantern.glb", "DiyaLantern",
-            new Vector3(-10.5f, 0f, 5.5f), 0f, 0.45f,
+            new Vector3(-10.8f, 0f, 6.6f), 0f, 0.45f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         yield return LoadProp("Lantern_01.glb", "ChowkLantern",
             new Vector3(3.2f, 0f, 2.2f), 0f, 0.9f,
@@ -2489,10 +2644,11 @@ public class VillageBuilder : MonoBehaviour
             // SmallGrave FBX is a FLAT slab (raw 1.1 wide x 0.23 thick x 2.2
             // long) — normalise by WIDTH to a real 2.2 m grave length.
             // ByHeight (old: 1.2 m tall) scaled it to a 13 m wide slab.
-            // Phase 1: moved with the rest of the shamshan cluster to
-            // (17.5, -20.5), clear of the grown House_6.
+            // Phase 2: moved with the rest of the shamshan cluster to
+            // (18, -21.5), clear of the grown House_6 and of the fire
+            // place's new spot (15, -19.5).
             GameObject grave = InstantiateResourceModel("SmallGrave/SmallGrave", "SmallGrave",
-                new Vector3(17.5f, 0f, -20.5f), -30f, 2.2f, false);
+                new Vector3(18f, 0f, -21.5f), -30f, 2.2f, false);
             if (grave == null) Debug.LogWarning("[Village] Small grave FBX not placed");
         });
     }
@@ -2587,12 +2743,19 @@ public class VillageBuilder : MonoBehaviour
         // this headless render — Unlit rendered it black, the quad
         // invisible — so the disc stays a pale emissive disc; the
         // texture file moon_surface.png remains in the project.)
+        // Phase 2 (new references, 2026-11-08): the moon is the night's
+        // anchor in BOTH reference images — a BIG full moon high in a
+        // dark blue sky. The old 8 m disc at 57 m read small and dim.
+        // Now 11 m at ~52 m (about 12 degrees across, like the
+        // reference) with a wider halo. This is a position/size change,
+        // not another material tweak: the disc already has fog disabled
+        // (_Fog 0) and DayNightCycle drives its brightness.
         moonMaterial = MakeEmissive("Moon", new Color(0.85f, 0.88f, 0.95f), new Color(0.25f, 0.25f, 0.3f));
         moonMaterial.SetFloat("_Fog", 0f);
         moonMaterial.DisableKeyword("_FOG");
-        GameObject moon = Sphere("Moon", new Vector3(-28f, 26f, -42f), new Vector3(8f, 8f, 8f), moonMaterial, villageRoot);
+        GameObject moon = Sphere("Moon", new Vector3(-24f, 28f, -36f), new Vector3(11f, 11f, 11f), moonMaterial, villageRoot);
         Destroy(moon.GetComponent<Collider>());
-        moonGlow = MakeGlowQuad("MoonGlow", new Vector3(-28f, 26f, -42f), 28f, new Color(0.7f, 0.75f, 0.95f, 0.55f));
+        moonGlow = MakeGlowQuad("MoonGlow", new Vector3(-24f, 28f, -36f), 34f, new Color(0.7f, 0.75f, 0.95f, 0.55f));
     }
 
     // ------------------------------------------------------------------
@@ -2801,7 +2964,7 @@ public class VillageBuilder : MonoBehaviour
         // Haveli front (haveli sits at x=16 facing the chowk/west).
         AddPointLight("HaveliLantern", new Vector3(13.5f, 2.5f, -3.5f),
             new Color(1f, 0.72f, 0.38f), 1.0f, 8f);
-        // Gate + Ambassador (car at (1, 16), gate at (0, 20.5)). The
+        // Gate + Ambassador (car at (2.5, 15), gate at (0, 20.5)). The
         // lantern sits SOUTH of the car (z=14, not 18): attempt-20
         // proved a lantern north of the car lights only its far side —
         // the camera-facing south side stayed black. At z=14 it lights

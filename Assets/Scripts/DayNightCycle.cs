@@ -145,8 +145,12 @@ public class DayNightCycle : MonoBehaviour
 
     private void ApplyDay()
     {
-        SetSun(1f, kDaySun, 50f);
-        SetSky(kDaySky, kDayFog, 0.004f, kDayAmbient);
+        // Phase 2 day target (2026-11-08): the day reference is bright
+        // sun, blue sky, hard light — the old sun 1.0 left the day flat
+        // and the puddles matte. Sun 1.3 + thinner day haze (0.0025);
+        // night/dusk values are untouched (full lighting pass is Phase 3).
+        SetSun(1.3f, kDaySun, 50f);
+        SetSky(kDaySky, kDayFog, 0.0025f, kDayAmbient);
         SetLamp(0f);
         SetMoon(0f);
     }

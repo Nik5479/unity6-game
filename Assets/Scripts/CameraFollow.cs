@@ -2,8 +2,13 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 
 /// <summary>
-/// Third-person follow camera (Phase 1).
-/// Follows the player from behind at a fixed distance/height.
+/// Third-person follow camera (GTA V pass, 2026-11-08).
+/// Over-the-shoulder GTA V framing: close behind Nilesh, near head
+/// height, looking slightly down the lane, hero large in the lower
+/// centre-left of the frame — not the high surveillance view the user
+/// rejected in the Phase 1 screenshots (distance 5.0 / height 2.2 /
+/// pitch 12 put the lens ~3.7 m up, ~4.9 m back, ~21 deg down, and
+/// Nilesh filled only ~20% of the frame).
 /// Drag on the right half of the screen (outside UI) rotates the yaw;
 /// mouse drag works the same in the Editor. AddShake is used by the
 /// monster knocks for a horror jolt.
@@ -11,22 +16,39 @@ using UnityEngine.EventSystems;
 public class CameraFollow : MonoBehaviour
 {
     public Transform target;
-    // GTA-style third-person (fix 2026-11-08, user video v1.0.2): the
-    // old values (distance 9 / height 4.6 / pitch 18) put the camera
-    // 7.4 m above the player, 8.6 m back, looking down at 35 degrees —
-    // a bird's-eye surveillance view, not a third-person game camera.
-    // GTA V sits ~4 m behind at ~2 m up, looking down ~10-15 degrees,
-    // so the hero fills the frame and the street ahead reads. The old
-    // high values were chosen only so the screenshot test saw >= 3
-    // houses; that test's bar is now >= 1 house (see ScreenshotTest).
-    // Phase 1 (2026-11-08): the village is real-size now (temple 10 m,
-    // banyan 13 m, houses 3.5-5.5 m) — the camera steps back a little
-    // (4.5 -> 5.0 m) and up (2.0 -> 2.2 m) so the taller village still
-    // reads over Nilesh's shoulder instead of filling the frame with
-    // the nearest wall.
-    public float distance = 5.0f;
-    public float height = 2.2f;
-    public float pitch = 12f;
+    // GTA V over-the-shoulder framing (fix 2026-11-08, user verdict on
+    // the Phase 1 screenshots: "camera is NOT GTA V enough"). The
+    // village camera runs at 70 deg vertical FOV (VillageBuilder), so
+    // the visible height at the player is 2 * slant * tan(35 deg)
+    // ~= 1.40 * slant. Nilesh is 1.79 m tall, so for him to fill
+    // ~35-40% of the frame the slant distance must be ~3.4 m:
+    // 1.79 / (1.40 * 3.45) ~= 0.37.
+    //   distance 3.4:  camera ~3.4 m behind Nilesh (was 5.0).
+    //   height 1.15:   camera ~1.95 m above the ground (player origin
+    //                  sits at y 0.5, so 0.5 + 1.15 + the pitch lift
+    //                  3.4 * sin(5 deg) ~= 0.30) — just above head
+    //                  height, the way GTA V sits the lens over the
+    //                  hero's shoulder instead of looking down at him.
+    //   pitch 5:      near eye-level; the old 12 deg pitch plus the
+    //                  2.2 m height is what made the ~21 deg down-angle.
+    //   lookHeight 0.8: the camera looks at Nilesh's upper chest
+    //                  (y ~= 1.3), not at y 1.9 above his head as
+    //                  before — so his head sits above frame centre and
+    //                  his feet near the bottom edge: hero lower-centre,
+    //                  lane and houses reading over his shoulder, as in
+    //                  the user's visual target (1001727684_1_8iul.png).
+    //   shoulderOffset 0.65: GTA V sits the lens to the hero's right,
+    //                  so Nilesh reads left-of-centre and the street
+    //                  ahead stays open. Applied to the camera AND the
+    //                  look target, so the view direction is unchanged.
+    // CameraFollow is added at runtime by VillageBuilder (AddComponent),
+    // so these field defaults ARE the live values — there is no
+    // serialized scene copy to update.
+    public float distance = 3.4f;
+    public float height = 1.15f;
+    public float pitch = 5f;
+    public float lookHeight = 0.8f;
+    public float shoulderOffset = 0.65f;
 
     private float yaw;
     private float shakeAmount;
@@ -56,6 +78,21 @@ public class CameraFollow : MonoBehaviour
         }
     }
 
+    // One place for the framing math: the wanted camera position and
+    // look target for a given yaw. LateUpdate and ResetToStarterView
+    // share it, so a reset can never bring back a different (high)
+    // framing from the follow camera.
+    private void ComputeFraming(float useYaw, out Vector3 camPos, out Vector3 lookAt)
+    {
+        Quaternion rot = Quaternion.Euler(pitch, useYaw, 0f);
+        Vector3 right = Quaternion.Euler(0f, useYaw, 0f) * Vector3.right;
+        Vector3 offset = rot * new Vector3(0f, 0f, -distance);
+        camPos = target.position + new Vector3(0f, height, 0f) + offset
+            + right * shoulderOffset;
+        lookAt = target.position + Vector3.up * lookHeight
+            + right * shoulderOffset;
+    }
+
     void LateUpdate()
     {
         HandleTouchDrag();
@@ -63,30 +100,50 @@ public class CameraFollow : MonoBehaviour
 
         if (target == null) return;
 
-        // GTA V auto-centre: while the player is actually moving and the
-        // user has not dragged the camera recently, ease the yaw behind
-        // the player's facing direction (the player faces its movement
-        // direction, PlayerController). Slow rate so it never snaps.
+        // GTA V auto-centre, gated on FORWARD motion (handoff §4.10 /
+        // Phase 4: "camera auto-centre fights steering"). The old code
+        // re-centred behind the player on ANY movement: movement is
+        // camera-relative (PlayerController), so pushing the joystick
+        // sideways turned Nilesh, the camera chased his new facing,
+        // that changed what "forward" meant, and the player kept
+        // circling — a feedback loop. Now the camera only eases behind
+        // him while he is actually moving forward relative to the
+        // camera (velocity within 40 deg of the camera's forward).
+        // Strafing, turning on the spot and walking backwards leave the
+        // camera where the player put it, so steering stays stable.
+        // A manual drag still buys a 2.0 s grace period.
         float targetSpeed = 0f;
+        Vector3 moveDir = Vector3.zero;
         if (hasPrevTargetPos)
         {
-            targetSpeed = (target.position - prevTargetPos).magnitude / Mathf.Max(Time.deltaTime, 0.001f);
+            Vector3 delta = target.position - prevTargetPos;
+            delta.y = 0f;
+            float moved = delta.magnitude;
+            targetSpeed = moved / Mathf.Max(Time.deltaTime, 0.001f);
+            if (moved > 0.001f) moveDir = delta / moved;
         }
         prevTargetPos = target.position;
         hasPrevTargetPos = true;
-        if (targetSpeed > 0.5f && Time.time - lastManualDragTime > 1.5f)
+        if (targetSpeed > 0.5f && moveDir != Vector3.zero
+            && Time.time - lastManualDragTime > 2.0f)
         {
-            yaw = Mathf.MoveTowardsAngle(yaw, target.eulerAngles.y, 60f * Time.deltaTime);
+            Vector3 camFwd = new Vector3(
+                Mathf.Sin(yaw * Mathf.Deg2Rad), 0f, Mathf.Cos(yaw * Mathf.Deg2Rad));
+            if (Vector3.Angle(moveDir, camFwd) < 40f)
+            {
+                yaw = Mathf.MoveTowardsAngle(yaw, target.eulerAngles.y, 60f * Time.deltaTime);
+            }
         }
 
-        Vector3 offset = Quaternion.Euler(pitch, yaw, 0f) * new Vector3(0f, 0f, -distance);
-        Vector3 want = target.position + new Vector3(0f, height, 0f) + offset;
+        Vector3 want;
+        Vector3 look;
+        ComputeFraming(yaw, out want, out look);
 
         // GTA V camera collision: never let a wall/house sit between the
         // player and the camera. Raycast from the player's head to the
         // wanted position; on a hit, pull the camera just in front of the
         // obstacle. Default view is unchanged (no hit on open ground), so
-        // the screenshot test's >= 3 houses framing is unaffected.
+        // the screenshot test's >= 1 house framing is unaffected.
         Vector3 headPos = target.position + Vector3.up * 1.4f;
         Vector3 toCam = want - headPos;
         float toCamDist = toCam.magnitude;
@@ -104,7 +161,6 @@ public class CameraFollow : MonoBehaviour
 
         transform.position = Vector3.Lerp(transform.position, want, 1f - Mathf.Exp(-8f * Time.deltaTime));
 
-        Vector3 look = target.position + Vector3.up * 1.4f;
         if (shakeAmount > 0.01f)
         {
             look += Random.insideUnitSphere * shakeAmount * 0.18f;
@@ -122,24 +178,24 @@ public class CameraFollow : MonoBehaviour
     /// Reset to the known-good starter camera view and stop following.
     /// Used by VillageBuilder when the camera-frustum check fails, so the
     /// player always gets a view of the village instead of an empty frame.
-    /// GTA fix 2026-11-08: the fallback is now the same over-the-shoulder
-    /// framing as the follow camera (behind the player), not the old
-    /// (0,4,10) high view — a reset must never bring back the top-down
+    /// Same over-the-shoulder framing as the follow camera (via
+    /// ComputeFraming) — a reset must never bring back the top-down
     /// look the user complained about.
     /// </summary>
     public void ResetToStarterView()
     {
         if (target != null)
         {
-            Vector3 offset = Quaternion.Euler(pitch, target.eulerAngles.y, 0f)
-                * new Vector3(0f, 0f, -distance);
-            transform.position = target.position + new Vector3(0f, height, 0f) + offset;
-            transform.LookAt(target.position + Vector3.up * 1.4f);
+            Vector3 pos;
+            Vector3 look;
+            ComputeFraming(target.eulerAngles.y, out pos, out look);
+            transform.position = pos;
+            transform.LookAt(look);
         }
         else
         {
-            transform.position = new Vector3(0f, 2.2f, -5f);
-            transform.rotation = Quaternion.Euler(12f, 0f, 0f);
+            transform.position = new Vector3(0f, 1.95f, -3.4f);
+            transform.rotation = Quaternion.Euler(10f, 0f, 0f);
         }
         enabled = false;
     }
@@ -168,7 +224,7 @@ public class CameraFollow : MonoBehaviour
             {
                 Vector2 delta = t.position - lastDragPos;
                 yaw -= delta.x * 0.28f;
-                pitch = Mathf.Clamp(pitch + delta.y * 0.12f, 4f, 32f);
+                pitch = Mathf.Clamp(pitch + delta.y * 0.12f, 2f, 28f);
                 lastDragPos = t.position;
                 lastManualDragTime = Time.time;
             }
@@ -193,7 +249,7 @@ public class CameraFollow : MonoBehaviour
         {
             Vector2 delta = (Vector2)Input.mousePosition - lastDragPos;
             yaw -= delta.x * 0.28f;
-            pitch = Mathf.Clamp(pitch + delta.y * 0.12f, 4f, 32f);
+            pitch = Mathf.Clamp(pitch + delta.y * 0.12f, 2f, 28f);
             lastDragPos = Input.mousePosition;
             lastManualDragTime = Time.time;
         }
