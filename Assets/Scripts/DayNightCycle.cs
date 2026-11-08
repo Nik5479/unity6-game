@@ -49,9 +49,33 @@ public class DayNightCycle : MonoBehaviour
     // is kept (lamps are warm, moon is cool blue).
     private static readonly Color kNightAmbient = new Color(0.40f, 0.41f, 0.48f);
 
+    // Daytime sky (audit M8): the only skybox was the moonless NIGHT
+    // HDRI, so the day sky read near-black at the top. By day a
+    // procedural sky (Skybox/Procedural, in Always Included Shaders) is
+    // used; the night HDRI comes back as the light fades. If the shader
+    // is missing the camera clears to the day sky colour instead.
+    private Material nightSkybox, daySkybox;
+
     void Awake()
     {
         cam = Camera.main;
+        nightSkybox = RenderSettings.skybox;
+        Shader proc = Shader.Find("Skybox/Procedural");
+        if (proc != null)
+        {
+            daySkybox = new Material(proc);
+            daySkybox.name = "DaySkyProcedural";
+            if (daySkybox.HasProperty("_SunDisk")) daySkybox.SetFloat("_SunDisk", 2f);
+            if (daySkybox.HasProperty("_SunSize")) daySkybox.SetFloat("_SunSize", 0.035f);
+            if (daySkybox.HasProperty("_AtmosphereThickness")) daySkybox.SetFloat("_AtmosphereThickness", 1.15f);
+            if (daySkybox.HasProperty("_SkyTint")) daySkybox.SetColor("_SkyTint", new Color(0.52f, 0.56f, 0.62f));
+            if (daySkybox.HasProperty("_GroundColor")) daySkybox.SetColor("_GroundColor", new Color(0.42f, 0.38f, 0.33f));
+            if (daySkybox.HasProperty("_Exposure")) daySkybox.SetFloat("_Exposure", 1.2f);
+        }
+        else
+        {
+            Debug.LogWarning("[DayNight] Skybox/Procedural not in build - day sky uses a solid colour");
+        }
     }
 
     void Update()
@@ -197,6 +221,19 @@ public class DayNightCycle : MonoBehaviour
         // is a no-op while the camera clears to Skybox, but harmless.
         // Ambient stays Flat (animated here) by design: switching ambient
         // to Skybox would freeze it at the dark HDRI level all day.
+        float skyLum = 0.2126f * sky.r + 0.7152f * sky.g + 0.0722f * sky.b;
+        bool dayish = skyLum > 0.3f;
+        if (dayish && daySkybox != null)
+        {
+            if (RenderSettings.skybox != daySkybox) RenderSettings.skybox = daySkybox;
+            if (cam != null) cam.clearFlags = CameraClearFlags.Skybox;
+            if (daySkybox.HasProperty("_Exposure"))
+                daySkybox.SetFloat("_Exposure", Mathf.Lerp(0.5f, 1.25f, Mathf.InverseLerp(0.3f, 0.76f, skyLum)));
+            return;
+        }
+        if (RenderSettings.skybox != nightSkybox && nightSkybox != null) RenderSettings.skybox = nightSkybox;
+        if (cam != null)
+            cam.clearFlags = (dayish && daySkybox == null) ? CameraClearFlags.SolidColor : CameraClearFlags.Skybox;
         Material skybox = RenderSettings.skybox;
         if (skybox != null && skybox.HasProperty("_Exposure"))
         {
