@@ -15,6 +15,11 @@ public class DayNightCycle : MonoBehaviour
     public Material moonMaterial;
     public GameObject lampGlow;
     public GameObject moonGlow;
+    // OVERNIGHT R1 (2026-11-09): the moon DISC itself. SetMoon(0) only
+    // dimmed its material to 0.3-grey — the sphere stayed visible as a
+    // pale disc in the day sky (audit 4.4). Now the whole object hides
+    // by day and returns at night.
+    public GameObject moonObject;
 
     public float dayLength = 60f;
     public float duskLength = 8f;
@@ -282,6 +287,12 @@ public class DayNightCycle : MonoBehaviour
         if (moonGlow != null)
         {
             moonGlow.SetActive(k > 0.05f);
+        }
+        // OVERNIGHT R1: hide the disc itself by day — dimming its
+        // colour to 0.3 grey still left a visible pale disc in the sky.
+        if (moonObject != null)
+        {
+            moonObject.SetActive(k > 0.05f);
         }
     }
 }

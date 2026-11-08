@@ -155,6 +155,8 @@ public class VillageBuilder : MonoBehaviour
     public Material moonMaterial;
     public GameObject lampGlow;
     public GameObject moonGlow;
+    // OVERNIGHT R1: the moon sphere itself (hidden by day, see DayNightCycle.moonObject).
+    public GameObject moonGO;
 
     private Material matGround;
     private Material matPlaster;
@@ -171,6 +173,10 @@ public class VillageBuilder : MonoBehaviour
     private Material matPants;
     private Material matEye;
     private Material matLampGlass;
+    // OVERNIGHT R1: weathered dark grey-brown iron for the lamp pole /
+    // frame. The old matDark (0.02 near-black) pole + emissive-yellow
+    // head cube read as "black pole + yellow cube" by day (audit).
+    private Material matLampPole;
     private Material matShadowBlob;
     // Phase 4: Poly Haven CC0 1K textures (Assets/Resources/Textures/).
     private Material matBrick;
@@ -917,6 +923,8 @@ public class VillageBuilder : MonoBehaviour
         matPants = MakeFlat("Pants", new Color(0.18f, 0.16f, 0.14f), 0.4f);
         matEye = MakeEmissive("MonsterEyes", new Color(0.9f, 0.85f, 0.6f), new Color(1.4f, 1.1f, 0.35f));
         matLampGlass = MakeEmissive("LampGlass", new Color(1f, 0.85f, 0.55f), new Color(1.3f, 0.8f, 0.3f));
+        // OVERNIGHT R1: lamp iron — dark grey-brown, not near-black.
+        matLampPole = MakeFlat("LampPole", new Color(0.30f, 0.27f, 0.23f), 0.35f);
         matShadowBlob = MakeTransparent("ShadowBlob", new Color(0f, 0f, 0f, 0.35f));
 
         // Phase 4: Poly Haven CC0 1K textures — brick (temple), thatch
@@ -990,12 +998,15 @@ public class VillageBuilder : MonoBehaviour
         }
         Material m = new Material(s);
         m.name = "WaterPuddle";
-        // PILOT ROUND 2: the first water (pale 0.55,0.63,0.72 @ 0.5 alpha,
-        // smoothness 1.0) read as flat grey pancakes — too pale, too
-        // uniform, too opaque. Now deeper sky-blue, more transparent so
-        // the mud shows through, less mirror (0.65) so it glints instead
-        // of glaring white.
-        m.color = new Color(0.30f, 0.42f, 0.55f, 0.38f);
+        // OVERNIGHT R1: round 2's water (pale 0.30,0.42,0.55 @ 0.38
+        // alpha, smoothness 0.65) still read as flat light ovals — too
+        // pale, too little reflection. The village HAS a reflection
+        // probe (SetupReflectionProbe, rendered after all models load),
+        // so the discs can actually reflect: deeper sky-blue, more
+        // opaque so the mud stops showing through as a pale slab,
+        // smoothness 1.0 + metallic 0.35 so the probe's sky/lamp
+        // reflection reads as a glint, stronger ripple normal.
+        m.color = new Color(0.16f, 0.22f, 0.30f, 0.55f);
         m.SetFloat("_Mode", 3f);
         m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
         m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
@@ -1007,14 +1018,14 @@ public class VillageBuilder : MonoBehaviour
         m.SetFloat("_Blend", 0f);
         m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
         m.renderQueue = 3000;
-        m.SetFloat("_Metallic", 0f);
-        m.SetFloat("_Glossiness", 0.65f);
-        m.SetFloat("_Smoothness", 0.65f);
+        m.SetFloat("_Metallic", 0.35f);
+        m.SetFloat("_Glossiness", 1f);
+        m.SetFloat("_Smoothness", 1f);
         Texture2D ripple = LoadTex("brown_mud_dry_nor_gl_1k");
         if (ripple != null)
         {
             m.SetTexture("_BumpMap", ripple);
-            m.SetFloat("_BumpScale", 0.15f);
+            m.SetFloat("_BumpScale", 0.3f);
             m.EnableKeyword("_NORMALMAP");
         }
         return m;
@@ -1049,6 +1060,17 @@ public class VillageBuilder : MonoBehaviour
             go.GetComponent<Renderer>().material = mat;
         }
         return go;
+    }
+
+    // OVERNIGHT R1: flat ground disc — a flattened cylinder (~20 sides).
+    // Replaces Box for ground patches / lanes / grass: a box has 4 hard
+    // straight edges and reads as a raised rectangular tile from above
+    // (audit 1.3, pilot round 2). A disc with an elliptical scale and a
+    // random yaw reads as an irregular worn patch. Same scale semantics
+    // as Cylinder (x/z = diameters, y = thickness).
+    private GameObject Disc(string name, Vector3 pos, Vector3 scale, Material mat, Transform parent)
+    {
+        return Cylinder(name, pos, scale, mat, parent);
     }
 
     private GameObject Sphere(string name, Vector3 pos, Vector3 scale, Material mat, Transform parent)
@@ -1251,7 +1273,9 @@ public class VillageBuilder : MonoBehaviour
             float w = 2.4f + ((i % 3) - 1) * 0.35f;
             float l = 3.4f + ((i % 2) * 0.5f);
             float x = ((i % 3) - 1) * 0.3f;
-            GameObject patch = Box("DirtPath", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), dirt, villageRoot);
+            // OVERNIGHT R1: Disc, not Box — the rectangular lane patches
+            // were the hard-edged slabs in the screenshots (audit 1.3).
+            GameObject patch = Disc("DirtPath", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), dirt, villageRoot);
             patch.transform.rotation = Quaternion.Euler(0f, ((i * 7) % 13) - 6f, 0f);
             Destroy(patch.GetComponent<Collider>());
         }
@@ -1265,7 +1289,8 @@ public class VillageBuilder : MonoBehaviour
             float w = 3.4f + ((i % 2) * 0.5f);
             float l = 2.4f + ((i % 3) - 1) * 0.35f;
             float z = 7f + ((i % 3) - 1) * 0.3f;
-            GameObject patchEW = Box("DirtPathEW", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), dirt, villageRoot);
+            // OVERNIGHT R1: Disc, not Box (same hard-edge reason as above).
+            GameObject patchEW = Disc("DirtPathEW", new Vector3(x, 0.03f, z), new Vector3(w, 0.04f, l), dirt, villageRoot);
             patchEW.transform.rotation = Quaternion.Euler(0f, ((i * 11) % 13) - 6f, 0f);
             Destroy(patchEW.GetComponent<Collider>());
         }
@@ -1312,13 +1337,29 @@ public class VillageBuilder : MonoBehaviour
         };
         for (int i = 0; i < puddleSpots.Length; i++)
         {
-            // PILOT ROUND 2: smaller (0.6-1.1 m) and more irregular — the
-            // 0.8-1.4 m discs read as perfect grey pancakes.
+            // OVERNIGHT R1: each puddle is a CLUSTER of 3 overlapping
+            // discs (main + 2 satellites, offset + smaller) — a single
+            // disc, however small, reads as a perfect oval/pancake. A
+            // cluster has an irregular shoreline like real standing water.
             float r = 0.6f + (i % 4) * 0.17f;
-            GameObject puddle = Cylinder("WaterPuddle", puddleSpots[i],
-                new Vector3(r, 0.02f, r * (0.55f + (i % 2) * 0.2f)), waterMat, villageRoot);
-            puddle.transform.rotation = Quaternion.Euler(0f, (i * 53) % 180f, 0f);
-            Destroy(puddle.GetComponent<Collider>());
+            float yaw = (i * 53) % 180f;
+            Vector3[] lobes = new Vector3[]
+            {
+                new Vector3(0f, 0f, 0f),
+                new Vector3(r * 0.55f, 0.001f, r * 0.30f),
+                new Vector3(-r * 0.45f, 0.002f, -r * 0.35f),
+            };
+            float[] lobeR = new float[] { r, r * 0.55f, r * 0.45f };
+            for (int j = 0; j < lobes.Length; j++)
+            {
+                Vector3 lp = puddleSpots[i] + lobes[j];
+                // NOTE: Cylinder scale x/z are DIAMETERS (same as the old
+                // single disc: scale r = diameter r), not radii.
+                GameObject puddle = Cylinder("WaterPuddle", lp,
+                    new Vector3(lobeR[j], 0.02f, lobeR[j] * (0.55f + (i % 2) * 0.2f)), waterMat, villageRoot);
+                puddle.transform.rotation = Quaternion.Euler(0f, yaw + j * 31f, 0f);
+                Destroy(puddle.GetComponent<Collider>());
+            }
         }
 
         // Phase 4: cobbled chowk circle around the village centre.
@@ -1336,7 +1377,8 @@ public class VillageBuilder : MonoBehaviour
             float x = 4f + (i % 8) * 1.4f;
             float z = 12.5f + (i / 8) * 1.2f + ((i % 3) * 0.4f);
             Material gm = (matWitheredGrass != null) ? matWitheredGrass : matGrass;
-            GameObject tuft = Box("GrassPatch", new Vector3(x, 0.06f, z), new Vector3(1.1f, 0.04f, 1.1f), gm, villageRoot);
+            // OVERNIGHT R1: Disc, not Box — same hard-rectangle reason.
+            GameObject tuft = Disc("GrassPatch", new Vector3(x, 0.06f, z), new Vector3(1.1f + (i % 3) * 0.3f, 0.04f, 0.9f + (i % 2) * 0.4f), gm, villageRoot);
             tuft.transform.rotation = Quaternion.Euler(0f, i * 23f, 0f);
             Destroy(tuft.GetComponent<Collider>());
         }
@@ -1389,7 +1431,9 @@ public class VillageBuilder : MonoBehaviour
             // slabs with hard rectangular edges — darken toward the
             // ground tone so the edges blend.
             if (patchMat != null) patchMat.color = patchMat.color * 0.8f;
-            GameObject patch = Box("GroundPatch", new Vector3(patchSpots[i].x, 0.04f, patchSpots[i].z),
+            // OVERNIGHT R1: Disc, not Box — the rectangular ground
+            // patches were the hard-edged slabs in the angle2 shot.
+            GameObject patch = Disc("GroundPatch", new Vector3(patchSpots[i].x, 0.04f, patchSpots[i].z),
                 new Vector3(s, 0.04f, s * (0.8f + (i % 3) * 0.15f)), patchMat, villageRoot);
             patch.transform.rotation = Quaternion.Euler(0f, (i * 37) % 180f, 0f);
             Destroy(patch.GetComponent<Collider>());
@@ -1696,7 +1740,11 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(9f, 0f, -7f), 25f, 3.5f);
         yield return BuildRealHouse("House_5", "old_village_house_-_indian_game_asset_24_bac7.glb",
             new Vector3(-13f, 0f, 13f), -20f, 5.5f,
-            g => MuteOrangePlaster(g, "Material.002"));
+            // OVERNIGHT R1: House_5 is the SAME single-"Material.002"
+            // layout as House_Player/House_3 (verified in the .glb) and
+            // the old 0.78x tint never dented its orange texture (audit
+            // 1.1) — it gets the same real clay-PBR re-texture.
+            g => WeatherHutPlaster(g));
         yield return BuildRealHouse("House_6", "indian_village_house_famous_3d_model_37_4zjm.glb",
             new Vector3(13f, 0f, -14f), 10f, 5.5f);
     }
@@ -1957,11 +2005,16 @@ public class VillageBuilder : MonoBehaviour
         // Phase 2: the old 0.5 m emissive head read as a pale yellow
         // cube in daylight (screenshot). Smaller glass (0.34 m) inside
         // a dark cap + base frame, so it reads as a lantern, not a box.
+        // OVERNIGHT R1: still read as "black pole + yellow cube" by day
+        // (audit) — the head was a solid emissive box and the pole
+        // near-black iron. Now the pole/cap/base are weathered grey-brown
+        // iron (matLampPole) and the head is the same iron frame; only
+        // the small bulb sphere inside stays emissive glass.
         Vector3 lampPos = new Vector3(2.5f, 0f, 1.5f);
-        Cylinder("LampPole", lampPos + new Vector3(0f, 1.6f, 0f), new Vector3(0.22f, 3.2f, 0.22f), matDark, villageRoot);
-        Box("LampHead", lampPos + new Vector3(0f, 3.3f, 0f), new Vector3(0.34f, 0.3f, 0.34f), matLampGlass, villageRoot);
-        Box("LampCap", lampPos + new Vector3(0f, 3.5f, 0f), new Vector3(0.44f, 0.08f, 0.44f), matDark, villageRoot);
-        Box("LampBase", lampPos + new Vector3(0f, 3.12f, 0f), new Vector3(0.4f, 0.06f, 0.4f), matDark, villageRoot);
+        Cylinder("LampPole", lampPos + new Vector3(0f, 1.6f, 0f), new Vector3(0.22f, 3.2f, 0.22f), matLampPole, villageRoot);
+        Box("LampHead", lampPos + new Vector3(0f, 3.3f, 0f), new Vector3(0.34f, 0.3f, 0.34f), matLampPole, villageRoot);
+        Box("LampCap", lampPos + new Vector3(0f, 3.5f, 0f), new Vector3(0.44f, 0.08f, 0.44f), matLampPole, villageRoot);
+        Box("LampBase", lampPos + new Vector3(0f, 3.12f, 0f), new Vector3(0.4f, 0.06f, 0.4f), matLampPole, villageRoot);
         GameObject bulb = Sphere("LampBulb", lampPos + new Vector3(0f, 3.28f, 0f), new Vector3(0.22f, 0.22f, 0.22f), matLampGlass, villageRoot);
         Destroy(bulb.GetComponent<Collider>());
         GameObject lightGO = new GameObject("LampLight");
@@ -2257,7 +2310,8 @@ public class VillageBuilder : MonoBehaviour
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         yield return LoadProp("rusty_and_oil_stained_oil_barrel_43_s99h.glb", "OilBarrel",
             new Vector3(7.5f, 0f, 3.5f), 0f, 0.9f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
+            MuteOilBarrel);
         // Hospital bed INSIDE Nilesh's house (replaces the primitive bed).
         yield return LoadProp("old_and_worn_out_hospital_bed_42_kn6o.glb", "HospitalBed",
             playerBedPos, 90f, 2.1f,
@@ -2493,6 +2547,65 @@ public class VillageBuilder : MonoBehaviour
             }
         }
         Debug.Log("[Village] Pujari cloth fix applied");
+    }
+
+    // OVERNIGHT R1: the oil barrel's texture is toy-saturated red-orange
+    // (verified in the .glb: single "oil_barell" material, textured).
+    // A base-colour multiplier mutes the red without touching the rust
+    // detail in the texture; fine normal grain kills the flat plastic read.
+    private static void MuteOilBarrel(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D normal = Tex("brown_mud_dry_nor_gl_1k");
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null || m.name != "oil_barell") continue;
+                ToUrpLit(m);
+                Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : Color.white;
+                m.SetColor("_BaseColor", new Color(c.r * 0.62f, c.g * 0.55f, c.b * 0.48f, c.a));
+                m.SetFloat("_Smoothness", 0.55f);
+                if (normal != null)
+                {
+                    m.SetTexture("_BumpMap", normal);
+                    m.SetFloat("_BumpScale", 0.3f);
+                    m.EnableKeyword("_NORMALMAP");
+                }
+            }
+        }
+        Debug.Log("[Village] Oil barrel muted");
+    }
+
+    // OVERNIGHT R1: Mukhiya (Meshy, 1 textured material) reads as a flat
+    // white sheet at distance — the pale texture blows out in the day sun.
+    // A mild warm tint + grain knocks the blow-out down. 0.88 is
+    // deliberately gentle: his texture carries the face detail and must
+    // not be re-coloured, only dimmed.
+    private static void MuteMukhiyaWhite(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D normal = Tex("brown_mud_dry_nor_gl_1k");
+        System.Collections.Generic.HashSet<Material> seen =
+            new System.Collections.Generic.HashSet<Material>();
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null || !seen.Add(m)) continue;
+                ToUrpLit(m);
+                Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : Color.white;
+                m.SetColor("_BaseColor", new Color(c.r * 0.88f, c.g * 0.86f, c.b * 0.84f, c.a));
+                m.SetFloat("_Smoothness", 0.6f);
+                if (normal != null)
+                {
+                    m.SetTexture("_BumpMap", normal);
+                    m.SetFloat("_BumpScale", 0.25f);
+                    m.EnableKeyword("_NORMALMAP");
+                }
+            }
+        }
+        Debug.Log("[Village] Mukhiya white muted");
     }
 
     // Bullock cart: 2 materials, zero textures. Weathered wood PBR from
@@ -2777,7 +2890,8 @@ public class VillageBuilder : MonoBehaviour
         // static elder at his own house, outside the pilot bounds.
         yield return LoadProp("meshy_mukhiya_87_mky.glb", "Mukhiya",
             new Vector3(13.5f, 0f, -3.5f), 45f, 1.75f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None,
+            MuteMukhiyaWhite);
         // Chickens (user-made on Meshy) — placed ONCE (fix-push P0-4b:
         // was 3 copies of the same 2.4M-tri file; the file itself is
         // replaced with a decimated version by another worker).
@@ -3012,6 +3126,12 @@ public class VillageBuilder : MonoBehaviour
         moonMaterial.DisableKeyword("_FOG");
         GameObject moon = Sphere("Moon", new Vector3(-24f, 28f, -36f), new Vector3(11f, 11f, 11f), moonMaterial, villageRoot);
         Destroy(moon.GetComponent<Collider>());
+        // OVERNIGHT R1: the disc starts HIDDEN — DayNightCycle.SetMoon
+        // fades it in at night and hides it by day (audit 4.4: pale disc
+        // in the day sky). Without this the moon is visible for the first
+        // frames before the cycle's first ApplyDay runs.
+        moonGO = moon;
+        moon.SetActive(false);
         moonGlow = MakeGlowQuad("MoonGlow", new Vector3(-24f, 28f, -36f), 34f, new Color(0.7f, 0.75f, 0.95f, 0.55f));
     }
 
@@ -3064,6 +3184,7 @@ public class VillageBuilder : MonoBehaviour
         cycle.moonMaterial = moonMaterial;
         cycle.lampGlow = lampGlow;
         cycle.moonGlow = moonGlow;
+        cycle.moonObject = moonGO;
 
         // Monster (tall dark figure, hidden until night).
         GameObject monsterGO = BuildMonster();

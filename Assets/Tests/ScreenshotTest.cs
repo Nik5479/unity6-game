@@ -85,6 +85,12 @@ public class ScreenshotTest
             Assert.Greater(mukhiya.transform.position.x, 10f,
                 "Mukhiya still stands in the pilot area (x=" + mukhiya.transform.position.x + ")");
 
+        // (a3) OVERNIGHT R1: the moon must be HIDDEN in the day sky.
+        // SetMoon(0) used to only dim its material to 0.3-grey, leaving
+        // a pale disc visible (audit 4.4). GameObject.Find only finds
+        // ACTIVE objects, so null here proves it is hidden, not missing.
+        Assert.IsNull(GameObject.Find("Moon"), "Moon visible in day sky — SetMoon(0) must hide the disc");
+
         // (b) Houses must be visible from the gameplay camera.
         Plane[] planes = GeometryUtility.CalculateFrustumPlanes(cam);
         string[] houseNames = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6" };
@@ -206,6 +212,29 @@ public class ScreenshotTest
         Assert.IsNotNull(shot2, "Screenshot 2 failed to render");
         Assert.IsTrue(File.Exists(shot2), "Screenshot 2 file missing: " + shot2);
 
+        // OVERNIGHT R1, screenshots 5+6: wide day views of the REST of
+        // the village the pilot never covered — west (House_5, school,
+        // clinic) and east (haveli, House_2/6, shamshan edge, field).
+        // Same save/restore pattern as shot 2.
+        Behaviour followW = cam.GetComponent("CameraFollow") as Behaviour;
+        if (followW != null) followW.enabled = false;
+        cam.transform.position = new Vector3(14f, 8f, 16f);
+        cam.transform.LookAt(new Vector3(-10f, 1f, -2f));
+        yield return null;
+        string shot5 = RenderScreenshot(cam, "village-west.png", 1280, 720);
+        Assert.IsNotNull(shot5, "Screenshot 5 (village-west) failed to render");
+        Assert.IsTrue(File.Exists(shot5), "Screenshot 5 file missing: " + shot5);
+
+        cam.transform.position = new Vector3(-14f, 8f, 14f);
+        cam.transform.LookAt(new Vector3(10f, 1f, -6f));
+        yield return null;
+        string shot6 = RenderScreenshot(cam, "village-east.png", 1280, 720);
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (followW != null) followW.enabled = true;
+        Assert.IsNotNull(shot6, "Screenshot 6 (village-east) failed to render");
+        Assert.IsTrue(File.Exists(shot6), "Screenshot 6 file missing: " + shot6);
+
         // PILOT night shots: the reference images are NIGHT scenes and
         // every screenshot so far was DAY. Drive the cycle to night and
         // shoot the pilot from the gameplay camera (lamp + wet road) and
@@ -216,6 +245,9 @@ public class ScreenshotTest
         Assert.IsNotNull(cycle, "DayNightCycle not found for night shot");
         cycle.GetType().GetMethod("SkipToNight").Invoke(cycle, null);
         yield return new WaitForSeconds(2f);
+        // OVERNIGHT R1: the moon must be BACK at night (the day fix
+        // hides the object — prove the night path re-shows it).
+        Assert.IsNotNull(GameObject.Find("Moon"), "Moon missing at night — SetMoon(1) must re-show the disc");
         string shot3 = RenderScreenshot(cam, "main-scene-night.png", 1280, 720);
         Assert.IsNotNull(shot3, "Night screenshot failed to render");
         Assert.IsTrue(File.Exists(shot3), "Night screenshot file missing: " + shot3);
@@ -232,7 +264,7 @@ public class ScreenshotTest
         Assert.IsNotNull(shot4, "Night angle-2 screenshot failed to render");
         Assert.IsTrue(File.Exists(shot4), "Night angle-2 screenshot file missing: " + shot4);
 
-        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot3 + " | " + shot4);
+        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot3 + " | " + shot4);
         yield return null;
     }
 
