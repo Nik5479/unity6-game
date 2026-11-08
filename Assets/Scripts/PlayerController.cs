@@ -33,6 +33,12 @@ public class PlayerController : MonoBehaviour
     public Vector2 moveInput;
     // Set by the RUN button (hold).
     public bool runHeld;
+    // OVERNIGHT R3: crouch (hold the CROUCH button). Slow crouch-walk,
+    // no jumping while crouched. The animator plays the remapped
+    // CrouchWalk clip.
+    public bool crouchHeld;
+    public bool IsCrouching { get; private set; }
+    private const float kCrouchSpeed = 0.7f;
 
     // Set by VillageBuilder.
     public Camera playerCamera;
@@ -63,11 +69,15 @@ public class PlayerController : MonoBehaviour
 
         if (move.sqrMagnitude > 0.01f)
         {
+            // OVERNIGHT R3: crouch state follows the held button (grounded only).
+            IsCrouching = crouchHeld && isGrounded;
             // Joystick magnitude sets the speed: half deflection = walk,
             // full deflection = jog, RUN button held = run. Below half
             // deflection the walk scales with the stick (slow creep).
+            // Crouching overrides: slow crouch-walk scaled by the stick.
             float mag = Mathf.Clamp01(move.magnitude);
-            float target = runHeld ? RunSpeed
+            float target = IsCrouching ? kCrouchSpeed * mag
+                : runHeld ? RunSpeed
                 : (mag < 0.5f ? WalkSpeed * (mag / 0.5f)
                               : Mathf.Lerp(WalkSpeed, JogSpeed, (mag - 0.5f) / 0.5f));
             speedSmooth = Mathf.MoveTowards(speedSmooth, target,
@@ -89,6 +99,9 @@ public class PlayerController : MonoBehaviour
         else
         {
             // No input: decelerate to a stop (never snap to zero).
+            // OVERNIGHT R3: standing still with the crouch button held
+            // still counts as crouching (hide behind cover).
+            IsCrouching = crouchHeld && isGrounded;
             speedSmooth = Mathf.MoveTowards(speedSmooth, 0f, decel * Time.deltaTime);
             CurrentSpeed = speedSmooth;
         }
@@ -117,7 +130,7 @@ public class PlayerController : MonoBehaviour
 
     public void Jump()
     {
-        if (!isGrounded) return;
+        if (!isGrounded || IsCrouching) return;
         yVelocity = jumpForce;
         isGrounded = false;
     }

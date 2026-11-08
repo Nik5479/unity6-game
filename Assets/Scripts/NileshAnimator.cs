@@ -14,6 +14,7 @@ using UnityEngine;
 public class NileshAnimator : MonoBehaviour
 {
     private Animation anim;
+    private PlayerController pc;
     private string current = "";
     private Vector3 prevPos;
     private float speedSmooth;
@@ -22,6 +23,7 @@ public class NileshAnimator : MonoBehaviour
     void Start()
     {
         prevPos = transform.position;
+        pc = GetComponent<PlayerController>();
         GameObject nilesh = GameObject.Find("Player/Nilesh");
         if (nilesh == null)
         {
@@ -39,6 +41,12 @@ public class NileshAnimator : MonoBehaviour
         AddClip("NileshIdle");
         AddClip("NileshWalk");
         AddClip("NileshRun");
+        // OVERNIGHT R3: Sprint was remapped long ago but never loaded
+        // (audit 2.2); CrouchWalk + Jump are remapped by the CI remap
+        // test (RemapAnimationsTest) from the repo Mixamo FBX.
+        AddClip("NileshSprint");
+        AddClip("NileshCrouchWalk");
+        AddClip("NileshJump");
         if (anim.GetClip("NileshIdle") == null)
         {
             Debug.LogWarning("[NileshAnimator] Remapped clips missing — using embedded idle clip");
@@ -51,11 +59,17 @@ public class NileshAnimator : MonoBehaviour
         SetLoop("NileshIdle");
         hasWalk = SetLoop("NileshWalk");
         hasRun = SetLoop("NileshRun");
+        hasSprint = SetLoop("NileshSprint");
+        hasCrouch = SetLoop("NileshCrouchWalk");
+        // Jump plays ONCE (not looped) and holds its last frame until the
+        // landing crossfade takes over.
+        hasJump = anim["NileshJump"] != null;
+        if (hasJump) anim["NileshJump"].wrapMode = WrapMode.ClampForever;
         anim.Play("NileshIdle");
         current = "NileshIdle";
     }
 
-    private bool hasWalk, hasRun;
+    private bool hasWalk, hasRun, hasSprint, hasCrouch, hasJump;
 
     private bool SetLoop(string name)
     {
@@ -90,27 +104,50 @@ public class NileshAnimator : MonoBehaviour
 
         // Phase 1 speeds (PlayerController): walk 1.4, jog 2.5, run 4.0.
         // Jog uses the run clip (there is no separate jog clip).
-        string want = "NileshIdle";
-        if (speedSmooth > 0.4f) want = speedSmooth > 1.9f ? "NileshRun" : "NileshWalk";
-        if (want == "NileshRun" && !hasRun) want = hasWalk ? "NileshWalk" : "NileshIdle";
-        if (want == "NileshWalk" && !hasWalk) want = "NileshIdle";
-        if (want != current)
+        // OVERNIGHT R3: airborne (player centre y > 0.6 — ground is 0.5)
+        // plays the Jump clip once; crouching plays CrouchWalk; full
+        // run speed plays the Sprint clip (distinct from Run).
+        bool airborne = transform.position.y > 0.6f;
+        if (airborne && hasJump && current != "NileshJump")
         {
-            anim.CrossFade(want, kBlend);
-            current = want;
-            if (want == "NileshIdle" && anim["NileshIdle"] != null)
-                anim["NileshIdle"].speed = 1f;
+            anim.CrossFade("NileshJump", kBlend);
+            current = "NileshJump";
+        }
+        else if (!airborne)
+        {
+            string want = "NileshIdle";
+            if (pc != null && pc.IsCrouching)
+            {
+                want = hasCrouch ? "NileshCrouchWalk" : (hasWalk ? "NileshWalk" : "NileshIdle");
+            }
+            else if (speedSmooth > 0.4f)
+            {
+                if (speedSmooth > 3.4f) want = hasSprint ? "NileshSprint" : (hasRun ? "NileshRun" : "NileshWalk");
+                else if (speedSmooth > 1.9f) want = hasRun ? "NileshRun" : "NileshWalk";
+                else want = hasWalk ? "NileshWalk" : "NileshIdle";
+            }
+            if (want != current)
+            {
+                anim.CrossFade(want, kBlend);
+                current = want;
+                if (want == "NileshIdle" && anim["NileshIdle"] != null)
+                    anim["NileshIdle"].speed = 1f;
+            }
         }
         // Match the clip's playback speed to the ground speed so the feet
         // don't slide: the walk cycle is authored for ~1.4 m/s and the run
         // cycle for ~4.2 m/s. Clamped so a lag spike never fast-forwards
         // the animation. (Idle keeps 1x — it has no ground speed.)
-        if (current == "NileshWalk" || current == "NileshRun")
+        // OVERNIGHT R3: sprint base ~5.0 m/s (Mixamo Sprint take),
+        // crouch-walk base 0.7 m/s (PlayerController.kCrouchSpeed).
+        if (current == "NileshWalk" || current == "NileshRun" || current == "NileshSprint" || current == "NileshCrouchWalk")
         {
             AnimationState st = anim[current];
             if (st != null)
             {
-                float baseSpeed = (current == "NileshRun") ? 4.2f : 1.4f;
+                float baseSpeed = (current == "NileshSprint") ? 5.0f
+                    : (current == "NileshCrouchWalk") ? 0.7f
+                    : (current == "NileshRun") ? 4.2f : 1.4f;
                 st.speed = Mathf.Clamp(speedSmooth / baseSpeed, 0.5f, 1.5f);
             }
         }

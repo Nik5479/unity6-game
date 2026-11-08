@@ -385,6 +385,11 @@ public class MobileControls : MonoBehaviour
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-158f, 132f), new Vector2(66f, 66f));
         AddHold(runBtn, delegate(bool held) { if (player != null) player.runHeld = held; });
 
+        // OVERNIGHT R3: CROUCH button (hold) — left of the Run/Jump pair.
+        Button crouchBtn = MakeIconButton(hudRoot, "CrouchBtn", ControlIcons.IconKind.Crouch,
+            new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-238f, 94f), new Vector2(66f, 66f));
+        AddHold(crouchBtn, delegate(bool held) { if (player != null) player.crouchHeld = held; });
+
         torchButton = MakeIconButton(hudRoot, "TorchBtn", ControlIcons.IconKind.Flame,
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-54f, -32f), new Vector2(60f, 60f));
         torchButton.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (torch != null) torch.Toggle(); });

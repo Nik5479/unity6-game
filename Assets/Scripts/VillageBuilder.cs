@@ -183,6 +183,7 @@ public class VillageBuilder : MonoBehaviour
     private Material matThatch;
     private Material matMudDry;
     private Material matMudWet; // PILOT: darkened wet-lane variant of matMudDry.
+    private Material matMudFlat; // OVERNIGHT R3: texture-less wet-mud disc material (see BuildMaterials).
     private Material matCobble;
     private Material matLeaves;
     private Material matWitheredGrass;
@@ -929,6 +930,13 @@ public class VillageBuilder : MonoBehaviour
         matLampGlass = MakeEmissive("LampGlass", new Color(1f, 0.85f, 0.55f), new Color(1.3f, 0.8f, 0.3f));
         // OVERNIGHT R1: lamp iron — dark grey-brown, not near-black.
         matLampPole = MakeFlat("LampPole", new Color(0.30f, 0.27f, 0.23f), 0.35f);
+        // OVERNIGHT R3: the wet-lane discs still read as WOODEN PLATES in
+        // the emulator — the mud texture's linear streaks at 3x tiling
+        // read as wood grain at disc scale (worse in SwiftShader than in
+        // the CI render). A texture-less flat dark-brown disc with a wet
+        // sheen reads as a mud patch; the streaks do not. Smoothness 0.85
+        // keeps the wet-road glint.
+        matMudFlat = MakeFlat("MudFlat", new Color(0.42f, 0.38f, 0.33f), 0.85f);
         matShadowBlob = MakeTransparent("ShadowBlob", new Color(0f, 0f, 0f, 0.35f));
 
         // Phase 4: Poly Haven CC0 1K textures — brick (temple), thatch
@@ -1264,7 +1272,10 @@ public class VillageBuilder : MonoBehaviour
         // checkerboard of flat rectangles instead of one worn track.
         // PILOT: wet lanes — darkened mud (the reference road is wet,
         // darker + shinier than the dry ground around it).
-        Material dirt = (matMudWet != null) ? matMudWet
+        // OVERNIGHT R3: flat mud (no texture) — the textured matMudWet
+        // read as wooden plates (see BuildMaterials).
+        Material dirt = (matMudFlat != null) ? matMudFlat
+            : (matMudWet != null) ? matMudWet
             : (matMudDry != null)
             ? matMudDry
             : MakeFlat("DirtPath", new Color(0.45f, 0.35f, 0.24f), 0.05f);
@@ -1321,49 +1332,15 @@ public class VillageBuilder : MonoBehaviour
             Destroy(sheenEW.GetComponent<Collider>());
         }
 
-        // PUDDLES — PILOT: the old puddles were opaque near-black discs
-        // (0.09,0.11,0.15 + metallic 0.2, no reflection probe in the scene)
-        // — with nothing to reflect they rendered as flat black ovals in
-        // CI and white ovals in the emulator. They are GONE. Real standing
-        // water is transparent: a pale sky-blue disc (alpha 0.5) over the
-        // mud, smoothness 1.0 so the sun/lamp glints on it. Smaller
-        // (0.8-1.4 m) and only 6, on the lanes — a village road has
-        // puddles, not black holes.
-        Material waterMat = MakeWaterMaterial();
-        Vector3[] puddleSpots = new Vector3[]
-        {
-            new Vector3(0.8f, 0.045f, 2.5f), new Vector3(-0.9f, 0.045f, -4f),
-            new Vector3(1.2f, 0.045f, -8.5f), new Vector3(-0.6f, 0.045f, 10.5f),
-            new Vector3(3.6f, 0.045f, 0.4f), new Vector3(-4.5f, 0.045f, 7.5f),
-        };
-        for (int i = 0; i < puddleSpots.Length; i++)
-        {
-            // OVERNIGHT R1: each puddle is a CLUSTER of 3 overlapping
-            // discs (main + 2 satellites, offset + smaller) — a single
-            // disc, however small, reads as a perfect oval/pancake. A
-            // cluster has an irregular shoreline like real standing water.
-            // OVERNIGHT R1b: bigger (0.9–1.4 m) — the R1 discs were too
-            // small to identify as water at all.
-            float r = 0.9f + (i % 4) * 0.17f;
-            float yaw = (i * 53) % 180f;
-            Vector3[] lobes = new Vector3[]
-            {
-                new Vector3(0f, 0f, 0f),
-                new Vector3(r * 0.55f, 0.001f, r * 0.30f),
-                new Vector3(-r * 0.45f, 0.002f, -r * 0.35f),
-            };
-            float[] lobeR = new float[] { r, r * 0.55f, r * 0.45f };
-            for (int j = 0; j < lobes.Length; j++)
-            {
-                Vector3 lp = puddleSpots[i] + lobes[j];
-                // NOTE: Cylinder scale x/z are DIAMETERS (same as the old
-                // single disc: scale r = diameter r), not radii.
-                GameObject puddle = Cylinder("WaterPuddle", lp,
-                    new Vector3(lobeR[j], 0.02f, lobeR[j] * (0.55f + (i % 2) * 0.2f)), waterMat, villageRoot);
-                puddle.transform.rotation = Quaternion.Euler(0f, yaw + j * 31f, 0f);
-                Destroy(puddle.GetComponent<Collider>());
-            }
-        }
+        // PUDDLES — REMOVED (OVERNIGHT R3). Three rounds of transparent
+        // water discs (pilot + R1 clusters + R1b bigger/darker) never read
+        // as water in either renderer: dark stain ovals in the CI render,
+        // pale/white ovals in the emulator — in both cases they read as
+        // bugs, not standing water, even with the reflection probe in the
+        // scene. The wet look stays via the WetSheen strips above + the
+        // darkened mud lanes. Audit 1.4 stays FAIL (no standing water) —
+        // honest, and the lane no longer carries fake-water artefacts.
+        // MakeWaterMaterial() is kept unused for a future real-water pass.
 
         // Phase 4: cobbled chowk circle around the village centre.
         if (matCobble != null)

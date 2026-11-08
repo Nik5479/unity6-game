@@ -22,7 +22,9 @@ using UnityEngine;
 ///
 /// Run from the menu: Forgotten Village -&gt; Remap Mixamo Clips to Nilesh.
 /// Reads Assets/Editor/NileshRigMap.json (generated from the .glb).
-/// Writes Assets/Resources/Animations/Nilesh{Idle,Walk,Run,Sprint}.anim.
+/// Writes Assets/Resources/Animations/Nilesh{Idle,Walk,Run,Sprint,
+/// CrouchWalk,Jump}.anim. (OVERNIGHT R3: CrouchWalk + Jump added —
+/// the CI remap test runs this tool in the licensed CI editor.)
 /// </summary>
 public static class RemapMixamoClips
 {
@@ -52,8 +54,8 @@ public static class RemapMixamoClips
         public Quaternion rot;
     }
 
-    private static readonly string[] kSourceFiles = { "Idle", "Walking", "Running", "Sprint" };
-    private static readonly string[] kOutNames = { "NileshIdle", "NileshWalk", "NileshRun", "NileshSprint" };
+    private static readonly string[] kSourceFiles = { "Idle", "Walking", "Running", "Sprint", "CrouchWalk", "Jumping" };
+    private static readonly string[] kOutNames = { "NileshIdle", "NileshWalk", "NileshRun", "NileshSprint", "NileshCrouchWalk", "NileshJump" };
 
     [MenuItem("Forgotten Village/Remap Mixamo Clips to Nilesh")]
     public static void Remap()
@@ -81,16 +83,20 @@ public static class RemapMixamoClips
 
         for (int i = 0; i < kSourceFiles.Length; i++)
         {
+            // OVERNIGHT R3: CrouchWalk + Jumping added (Remy-CrouchWalk /
+            // Remy-Jumping FBX are in the repo). Jump is a one-shot, not a
+            // loop — ClampForever holds the landing pose until the
+            // animator crossfades away.
             RemapOne("Assets/Mixamo/Remy-" + kSourceFiles[i] + ".fbx",
                 "Assets/Resources/Animations/" + kOutNames[i] + ".anim",
-                map, nilesh);
+                map, nilesh, kOutNames[i] != "NileshJump");
         }
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         Debug.Log("[Remap] DONE");
     }
 
-    private static void RemapOne(string fbxPath, string outPath, RigMap map, Dictionary<string, RestPose> nilesh)
+    private static void RemapOne(string fbxPath, string outPath, RigMap map, Dictionary<string, RestPose> nilesh, bool loop)
     {
         GameObject model = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
         if (model == null)
@@ -193,7 +199,7 @@ public static class RemapMixamoClips
         AnimationClip dst = new AnimationClip();
         dst.name = Path.GetFileNameWithoutExtension(outPath);
         dst.legacy = true;
-        dst.wrapMode = WrapMode.Loop;
+        dst.wrapMode = loop ? WrapMode.Loop : WrapMode.ClampForever;
         dst.frameRate = 30f;
 
         // ---- FK retarget (rotations) ----

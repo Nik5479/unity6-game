@@ -10,7 +10,7 @@ using UnityEngine;
 /// </summary>
 public static class ControlIcons
 {
-    public enum IconKind { Lock, Flame, Run, Jump, Hand }
+    public enum IconKind { Lock, Flame, Run, Jump, Hand, Crouch }
 
     private const int S = 256;
     private static Sprite s_circle;
@@ -68,6 +68,7 @@ public static class ControlIcons
             case IconKind.Run: DrawRun(a); break;
             case IconKind.Jump: DrawJump(a); break;
             case IconKind.Hand: DrawHand(a); break;
+            case IconKind.Crouch: DrawCrouch(a); break;
         }
         s = SpriteFromAlpha(a, "Icon_" + kind);
         s_icons[kind] = s;
@@ -130,6 +131,20 @@ public static class ControlIcons
         Capsule(a, 138f, 128f, 138f, 70f, 14f);        // ring
         Capsule(a, 152f, 128f, 152f, 80f, 14f);        // pinky
         Capsule(a, 104f, 162f, 80f, 142f, 14f);        // thumb
+    }
+
+    private static void DrawCrouch(float[] a)
+    {
+        // Crouching figure, facing right: low head, bent torso, folded
+        // legs, on a ground line. Same stick-figure language as DrawRun.
+        Disc(a, 132f, 96f, 17f);                       // head
+        Capsule(a, 128f, 112f, 108f, 158f, 17f);       // bent torso
+        Capsule(a, 120f, 126f, 92f, 162f, 13f);        // arm down
+        Capsule(a, 108f, 158f, 150f, 180f, 15f);       // front thigh
+        Capsule(a, 150f, 180f, 170f, 204f, 13f);       // front shin
+        Capsule(a, 108f, 158f, 76f, 182f, 15f);        // back thigh
+        Capsule(a, 76f, 182f, 58f, 204f, 13f);         // back shin
+        RoundRect(a, 52f, 204f, 204f, 216f, 6f);       // ground line
     }
 
     // ------------------------------------------------------------------

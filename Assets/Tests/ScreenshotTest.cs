@@ -73,10 +73,14 @@ public class ScreenshotTest
         Assert.Greater(childCount, 50, "Village has too few objects (" + childCount + ") — builder did not run");
 
         // (a2) PILOT (2026-11-08): the opaque black puddle discs must be
-        // gone (replaced by transparent WaterPuddle discs) and the static
-        // Mukhiya must be out of the pilot area (by the haveli, x > 10).
+        // gone and the static Mukhiya must be out of the pilot area (by
+        // the haveli, x > 10).
         Assert.IsNull(GameObject.Find("Puddle"), "Old opaque Puddle discs still present — pilot water fix missing");
-        Assert.IsNotNull(GameObject.Find("WaterPuddle"), "No WaterPuddle discs — pilot water fix missing");
+        // OVERNIGHT R3: the WaterPuddle discs are GONE (removed — they
+        // read as white/dark stain ovals in both renderers, never as
+        // water). The wet look is the WetSheen strips + dark mud lanes.
+        Assert.IsNull(GameObject.Find("WaterPuddle"), "WaterPuddle discs still present — overnight R3 removed them");
+        Assert.IsNotNull(GameObject.Find("WetSheenNS"), "WetSheen strip missing — wet-road look has no source");
         // OVERNIGHT (Ambassador FIXED): the car is BACK — the Blender
         // material split replaced the toy-painted file (see VillageBuilder).
         Assert.IsNotNull(GameObject.Find("HeroCar"), "HeroCar missing — the fixed Ambassador file should load");
