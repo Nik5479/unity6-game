@@ -41,7 +41,7 @@ jobs:
           arch: x86_64
           ram-size: 4096M
           heap-size: 512M
-          disk-size: 8192M
+          disk-size: 4096M
           emulator-options: -no-window -no-snapshot -no-audio -gpu swiftshader_indirect -no-boot-anim
           disable-animations: true
           script: |
@@ -50,7 +50,7 @@ jobs:
             echo "--- launching game ---"
             adb shell am start -n com.nik.forgottenvillage/com.unity3d.player.UnityPlayerActivity
             echo "--- waiting for village to build (slow on emulator) ---"
-            sleep 180
+            sleep 300
             adb exec-out screencap -p > shot-1.png
             sleep 60
             adb exec-out screencap -p > shot-2.png
