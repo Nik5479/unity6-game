@@ -26,6 +26,31 @@ public static class VillageColliders
         s_blocks.Clear();
     }
 
+    // Camera collision (audit M1): ray vs the registered blocking volumes
+    // (glTF houses/well/walls have no physics colliders, only these AABBs).
+    // Only volumes big enough to hide the player count (>= 1.5 m tall and
+    // >= 1 m wide), so fence rails and small props no longer make the
+    // camera jerk forward, and volumes that contain the ray origin (the
+    // player standing inside a house's outer bounds) are ignored.
+    public static bool CameraRay(Vector3 origin, Vector3 dir, float maxDist, out float hitDist)
+    {
+        hitDist = maxDist;
+        bool hit = false;
+        Ray ray = new Ray(origin, dir);
+        foreach (Bounds b in s_blocks)
+        {
+            if (b.size.y < 1.5f || Mathf.Max(b.size.x, b.size.z) < 1f) continue;
+            if (b.Contains(origin)) continue;
+            float d;
+            if (b.IntersectRay(ray, out d) && d < hitDist)
+            {
+                hitDist = d;
+                hit = true;
+            }
+        }
+        return hit;
+    }
+
     // Circle (XZ) vs AABB test, radius in metres.
     public static bool CanMoveTo(Vector3 pos, float radius)
     {
@@ -172,7 +197,10 @@ public class VillageBuilder : MonoBehaviour
     // loaded. 90 s is ~4x the editor build time (so the editor/CI full
     // build is unaffected) and still caps a budget phone's wait at a
     // minute and a half.
-    private const float kBuildDeadlineSeconds = 90f;
+    // 2026-11-08 asset diet: models are now ~10x lighter (KTX2 textures,
+    // simplified meshes), so the full village should load well inside
+    // this. The deadline is only a safety net for a stalled load now.
+    private const float kBuildDeadlineSeconds = 240f;
 
     void Awake()
     {
@@ -187,15 +215,21 @@ public class VillageBuilder : MonoBehaviour
             Screen.autorotateToPortraitUpsideDown = false;
             Screen.autorotateToLandscapeLeft = true;
             Screen.autorotateToLandscapeRight = true;
-            Screen.orientation = ScreenOrientation.LandscapeRight;
+            // Both landscape ways allowed (audit M5): AutoRotation honours
+            // the autorotate flags above; LandscapeRight used to lock it.
+            Screen.orientation = ScreenOrientation.AutoRotation;
         }
         catch (System.Exception e)
         {
             Debug.LogWarning("[Village] Orientation lock failed: " + e.Message);
         }
 
+        // Explicit 30 fps cap: stable frame pacing and less heat on
+        // mid-range phones (Android's implicit default, now explicit).
+        Application.targetFrameRate = 30;
         VillageColliders.Clear();
         mainCam = Camera.main;
+        ApplyRenderDiagFlags();
         villageRoot = new GameObject("Village").transform;
         CreateBootStatus();
         // Camera + movement fix 2026-11-08 (user video, v1.0.2): wire the
@@ -212,6 +246,7 @@ public class VillageBuilder : MonoBehaviour
         // Freeze fix: arm the build deadline and the per-model progress
         // display (so the player sees models loading, not a frozen
         // "Building..." line).
+        buildStartTime = Time.realtimeSinceStartup;
         GltfModelLoader.BuildDeadline = Time.realtimeSinceStartup + kBuildDeadlineSeconds;
         GltfModelLoader.DeadlineReached = false;
         GltfModelLoader.LoadTimings.Clear();
@@ -223,6 +258,42 @@ public class VillageBuilder : MonoBehaviour
         // the systems (door/monster/UI) are wired only after the village
         // exists. Intro + camera check start at the end of the coroutine.
         StartCoroutine(BuildVillageAsync());
+    }
+
+    // RENDER DIAGNOSTICS (audit H1, inverted colours on the emulator):
+    // the CI script can push <persistentDataPath>/diag.txt containing
+    // "nopost" and/or "nomsaa" and relaunch, so one CI run can tell
+    // whether post-processing or the MSAA resolve corrupts the colours.
+    // Without the file nothing changes. Logs the graphics API either way.
+    private void ApplyRenderDiagFlags()
+    {
+        Debug.Log("[Village] Graphics: " + SystemInfo.graphicsDeviceType + " / " + SystemInfo.graphicsDeviceVersion
+            + " / colour space " + QualitySettings.activeColorSpace);
+        try
+        {
+            string path = System.IO.Path.Combine(Application.persistentDataPath, "diag.txt");
+            if (!System.IO.File.Exists(path)) return;
+            string flags = System.IO.File.ReadAllText(path);
+            // Reflection keeps this file free of a compile-time URP
+            // assembly reference.
+            if (flags.Contains("nopost") && mainCam != null)
+            {
+                Component data = mainCam.GetComponent("UniversalAdditionalCameraData");
+                var prop = (data != null) ? data.GetType().GetProperty("renderPostProcessing") : null;
+                if (prop != null) prop.SetValue(data, false, null);
+            }
+            if (flags.Contains("nomsaa"))
+            {
+                object urp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+                var prop = (urp != null) ? urp.GetType().GetProperty("msaaSampleCount") : null;
+                if (prop != null && prop.CanWrite) prop.SetValue(urp, 1, null);
+            }
+            Debug.Log("[Village] Render diag flags: " + flags.Trim());
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] Render diag flags failed: " + e.Message);
+        }
     }
 
     // Camera + movement fix 2026-11-08 (user video, v1.0.2): the follow
@@ -272,22 +343,66 @@ public class VillageBuilder : MonoBehaviour
     // Phase 3: async village build. Real Sketchfab models load one by one
     // (each with a primitive fallback); a failed model never kills the
     // village. SetupSystems/SceneAmbience run after everything is placed.
+    // AUDIT M4: an exception thrown inside a nested build iterator used to
+    // end the whole coroutine chain without running the finally block, so
+    // SetupSystems (night, monster, GameManager) never ran. SafeStep drives
+    // the nested iterators itself, catches per step and moves on.
+    private System.Collections.IEnumerator SafeStep(string name, System.Collections.IEnumerator root)
+    {
+        var stack = new System.Collections.Generic.Stack<System.Collections.IEnumerator>();
+        stack.Push(root);
+        while (stack.Count > 0)
+        {
+            System.Collections.IEnumerator top = stack.Peek();
+            bool moved = false; object cur = null; bool failed = false;
+            try
+            {
+                moved = top.MoveNext();
+                if (moved) cur = top.Current;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError("[Village] Step " + name + " threw, skipping rest of it: " + e);
+                failed = true;
+            }
+            if (failed) break;
+            if (!moved) { stack.Pop(); continue; }
+            System.Collections.IEnumerator nested = cur as System.Collections.IEnumerator;
+            if (nested != null) { stack.Push(nested); continue; }
+            yield return cur;
+        }
+    }
+
+    // Watchdog: if the build has not finished shortly after the deadline
+    // (e.g. a step hangs), wire the game systems anyway.
+    private System.Collections.IEnumerator BuildWatchdog()
+    {
+        yield return new WaitForSecondsRealtime(kBuildDeadlineSeconds + 30f);
+        if (!buildFinished)
+        {
+            Debug.LogWarning("[Village] Watchdog: build still running after deadline, starting game systems");
+            AllModelsLoaded = true;
+            FinishBuild();
+        }
+    }
+
     private System.Collections.IEnumerator BuildVillageAsync()
     {
+        StartCoroutine(BuildWatchdog());
         try
         {
-            yield return BuildPlayerModelAsync();
-            yield return BuildHousesAsync();
-            yield return BuildWellAndLampAsync();
+            yield return SafeStep("PlayerModel", BuildPlayerModelAsync());
+            yield return SafeStep("Houses", BuildHousesAsync());
+            yield return SafeStep("WellAndLamp", BuildWellAndLampAsync());
             // Freeze fix: the monster is gameplay-critical (the night
             // knock IS the game) — load it early, while the deadline
             // still allows it, instead of last (where a slow phone never
             // reached it and the game started with the capsule fallback).
-            yield return BuildMonsterModelAsync();
+            yield return SafeStep("MonsterModel", BuildMonsterModelAsync());
             RunStep("Field", BuildField);
-            yield return BuildJungleAndFencesAsync();
-            yield return BuildPropsAsync();
-            yield return BuildNewModelsAsync();
+            yield return SafeStep("JungleAndFences", BuildJungleAndFencesAsync());
+            yield return SafeStep("Props", BuildPropsAsync());
+            yield return SafeStep("NewModels", BuildNewModelsAsync());
             RunStep("WarmLights", BuildWarmLights);
             RunStep("CleanupStrays", CleanupStrays);
             RunStep("Moon", BuildMoon);
@@ -318,10 +433,13 @@ public class VillageBuilder : MonoBehaviour
     // BuildMonster falls back to the capsule-man when the HellDemon
     // never loaded.
     private bool buildFinished;
+    private float buildStartTime;
     private void FinishBuild()
     {
         if (buildFinished) return;
         buildFinished = true;
+        // Dispose loads abandoned at the deadline once their tasks end.
+        StartCoroutine(GltfModelLoader.ReapAbandoned());
         // Teardown guard: if the scene is going away, do not wire systems.
         if (villageRoot == null || gameObject == null || !gameObject.scene.isLoaded) return;
         RunStep("SetupSystems", SetupSystems);
@@ -335,6 +453,10 @@ public class VillageBuilder : MonoBehaviour
         SetupReflectionProbe();
         StartCoroutine(IntroSequence());
         StartCoroutine(VerifyCameraView());
+        // Diagnostics for CI (emulator-play.sh greps this line).
+        Debug.Log("[Village] BuildStats: time=" + (Time.realtimeSinceStartup - buildStartTime).ToString("F1")
+            + "s models=" + GltfModelLoader.LoadTimings.Count + " cutShort=" + cutShort
+            + " slowest=" + SlowestLoads(5));
         if (cutShort)
         {
             Debug.LogWarning("[Village] Build cut short by the " + kBuildDeadlineSeconds
@@ -1687,7 +1809,31 @@ public class VillageBuilder : MonoBehaviour
         // Jungle edge: REAL tree clones ringing the village. The old
         // primitive blob trees (BuildTree) are gone — user ordered no
         // cartoon. Same ring positions as before, sources round-robin.
-        GameObject[] ringSources = new GameObject[] { mango, banyan, palm };
+        // PERF 2026-11-08: the ring used to clone the full-detail trees 36x
+        // (~3 M triangles). It now clones dedicated far-distance variants
+        // (~3k tris each, 256 px KTX2 textures, made offline with
+        // gltf-transform), each clone gets a LODGroup that culls it when it
+        // is tiny on screen, and materials have GPU instancing on. If a far
+        // variant fails to load, the near tree is used as before.
+        GameObject mangoFar = null, banyanFar = null, palmFar = null;
+        Vector3 hidden = new Vector3(0f, 0f, -80f);
+        yield return GltfModelLoader.LoadModel("mango_tree_far.glb", villageRoot, "Tree_MangoFar", hidden, 0f, 6f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => mangoFar = g);
+        yield return GltfModelLoader.LoadModel("banyan_far.glb", villageRoot, "Tree_BanyanFar", hidden, 0f, 7f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => banyanFar = g);
+        yield return GltfModelLoader.LoadModel("palm_far.glb", villageRoot, "Tree_PalmFar", hidden, 0f, 5f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => palmFar = g);
+        GameObject[] ringSources = new GameObject[] {
+            mangoFar != null ? mangoFar : mango,
+            banyanFar != null ? banyanFar : banyan,
+            palmFar != null ? palmFar : palm };
+        foreach (GameObject rs in ringSources)
+        {
+            if (rs == null) continue;
+            foreach (Renderer r in rs.GetComponentsInChildren<Renderer>())
+                foreach (Material m in r.sharedMaterials)
+                    if (m != null) m.enableInstancing = true;
+        }
         int ringIndex = 0;
         for (int x = -20; x <= 20; x += 4)
         {
@@ -1699,6 +1845,11 @@ public class VillageBuilder : MonoBehaviour
             CloneRingTree(ringSources, ringIndex++, new Vector3(-21f, 0f, z));
             CloneRingTree(ringSources, ringIndex++, new Vector3(21f, 0f, z));
         }
+
+        // The far sources were only templates for the ring clones.
+        if (mangoFar != null) mangoFar.SetActive(false);
+        if (banyanFar != null) banyanFar.SetActive(false);
+        if (palmFar != null) palmFar.SetActive(false);
 
         // Wood fences along the main lane: posts + two rails per segment.
         for (int i = 0; i < 5; i++)
@@ -1752,6 +1903,16 @@ public class VillageBuilder : MonoBehaviour
         c.transform.rotation = Quaternion.Euler(0f, (index * 47) % 360, 0f);
         float s = 0.9f + (index % 3) * 0.12f;
         c.transform.localScale = src.transform.localScale * s;
+        c.SetActive(true);
+        // Distance culling: drop the clone when it covers < 2.5% of the
+        // screen height (only far-side ring trees in practice).
+        Renderer[] rr = c.GetComponentsInChildren<Renderer>();
+        if (rr.Length > 0)
+        {
+            LODGroup lg = c.AddComponent<LODGroup>();
+            lg.SetLODs(new LOD[] { new LOD(0.025f, rr) });
+            lg.RecalculateBounds();
+        }
         Block(pos + new Vector3(0f, 1.1f, 0f), new Vector3(0.6f, 2.2f, 0.6f));
     }
 
@@ -1783,7 +1944,7 @@ public class VillageBuilder : MonoBehaviour
         // Placement fix 2026-11-07: the cart sat at (-6, -4) — ON the
         // west fence line (x=-5.5, z -13.4 to -1), the rail passing
         // through it. Now (-7.5, -4): 0.75 m clear of the fence.
-        yield return LoadProp("Bullcart/scene.gltf", "BullockCart",
+        yield return LoadProp("Bullcart.glb", "BullockCart",
             new Vector3(-7.5f, 0f, -4f), 0f, 2.5f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
             ApplyWoodPbr);
@@ -2190,10 +2351,10 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("sandstone_rocky_ground_vd3oeic_mid_59_23jb.glb", "SandstoneGround",
             new Vector3(-2f, -0.15f, -18f), 0f, 5f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
-        yield return LoadProp("SoilGround/xdhhdhl_tier_2.gltf", "SoilGround",
+        yield return LoadProp("SoilGround.glb", "SoilGround",
             new Vector3(-4f, 0f, 12f), 0f, 8f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
-        yield return LoadProp("ForestFloor/sfjmafua_tier_2.gltf", "ForestFloor",
+        yield return LoadProp("ForestFloor.glb", "ForestFloor",
             new Vector3(6f, 0f, -18f), 0f, 6f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         // Shamshan (south-east corner): grave stone set + small grave.
@@ -2215,7 +2376,7 @@ public class VillageBuilder : MonoBehaviour
         // far from the chowk and the main hindu temple (2, -17). A place
         // nobody goes to. (User's FINAL choice after two flips; Old Ruined
         // Temple stays on disk as backup only — do NOT place it.)
-        yield return LoadProp("Bhumija/scene.gltf", "AngkorTemple",
+        yield return LoadProp("Bhumija.glb", "AngkorTemple",
             new Vector3(21f, 0f, 12f), -90f, 8f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         // Follow-up 2026-11-07: Abandoned hospital building (54,041 tris,
@@ -2232,10 +2393,10 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(-7f, 0f, 19f), 0f, 6f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         // Lanterns: brass diya inside Nilesh's house, chowk lantern by the lamp.
-        yield return LoadProp("brass_diya_lantern/brass_diya_lantern_1k.gltf", "DiyaLantern",
+        yield return LoadProp("brass_diya_lantern.glb", "DiyaLantern",
             new Vector3(-10.5f, 0f, 4.5f), 0f, 0.45f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
-        yield return LoadProp("Lantern_01/Lantern_01_1k.gltf", "ChowkLantern",
+        yield return LoadProp("Lantern_01.glb", "ChowkLantern",
             new Vector3(3.2f, 0f, 2.2f), 0f, 0.9f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // Neem substitute (PlantCatalog Realistic HD Chinaberry tree,

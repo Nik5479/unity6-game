@@ -109,9 +109,33 @@ if [ $fail -eq 0 ]; then
   adb pull /sdcard/play-2.mp4 "$OUT/" || log "WARN: play-2.mp4 missing"
 fi
 
+# ---- render diagnostics (inverted colours): relaunch with post-processing
+# off, then MSAA off, and screenshot each (diag.txt read by VillageBuilder) ----
+diag_run() {
+  local flag=$1
+  adb shell am force-stop "$PKG"; sleep 2
+  adb shell "mkdir -p /sdcard/Android/data/$PKG/files && echo $flag > /sdcard/Android/data/$PKG/files/diag.txt" || true
+  adb logcat -c
+  adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null
+  for i in $(seq 1 40); do
+    sleep 5
+    adb logcat -d -s Unity:* 2>/dev/null | grep -q "objects built" && break
+  done
+  sleep 6
+  shot "diag-$flag"
+  log "diag $flag: $(adb logcat -d -s Unity:* 2>/dev/null | grep -oE 'Render diag flags: .*|BuildStats: .*' | tr '\n' ' ' | head -c 300)"
+}
+if [ $fail -eq 0 ] && [ "${SKIP_DIAG:-0}" != "1" ]; then
+  # keep the main logcat file; diag runs use the live buffer only
+  kill $LOGCAT_PID 2>/dev/null; LOGCAT_PID=
+  diag_run nopost
+  diag_run nomsaa
+  adb shell rm -f /sdcard/Android/data/$PKG/files/diag.txt || true
+fi
+
 # ---- crash / health checks ----
 sleep 2
-kill $LOGCAT_PID 2>/dev/null
+[ -n "$LOGCAT_PID" ] && kill $LOGCAT_PID 2>/dev/null
 adb logcat -d -b crash > "$OUT/logcat-crash.txt" 2>&1 || true
 grep -E "Unity|AndroidRuntime|DEBUG|libc|il2cpp|ActivityManager|lowmemory|CRASH|FATAL|backtrace|\[Village\]|\[Build\]" "$OUT/logcat-full.txt" > "$OUT/logcat-unity.txt" || true
 if adb shell pidof "$PKG" >/dev/null; then log "process alive at end: yes"; else log "FAIL: process not running at end"; fail=1; fi
@@ -129,6 +153,7 @@ uniq=$(find "$OUT" -name 'shot-*-play.png' -exec md5sum {} + | awk '{print $1}' 
 log "gameplay screenshots: $nplay, distinct: $uniq"
 [ "$nplay" -ge 2 ] && [ "$uniq" -lt 2 ] && { log "FAIL: all gameplay screenshots are byte-identical (game frozen)"; fail=1; }
 # Build diagnostics.
+log "graphics: $(grep -o "\[Village\] Graphics: .*" "$OUT/logcat-full.txt" | head -1)"
 log "build stats: $(grep -o '\[Village\] BuildStats:.*' "$OUT/logcat-full.txt" | tail -1)"
 grep -q "build timed out" "$OUT/logcat-full.txt" && log "WARN: village build hit its deadline (partial village)"
 log "E/Unity lines: $(grep -c ' E/Unity' "$OUT/logcat-full.txt"), missing-class errors: $(grep -c "Can't add component because class" "$OUT/logcat-full.txt"), gltf skipped/failed: $(grep -cE '\[Gltf\] (Skipped|Load failed|Load TIMEOUT|Instantiate)' "$OUT/logcat-full.txt"), ktx errors: $(grep -ciE 'ktx|basisu' "$OUT/logcat-full.txt" | head -1)"
