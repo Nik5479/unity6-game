@@ -47,7 +47,7 @@ for i in $(seq 1 84); do
     log "FAIL: game process died during load (t=$((i*5))s)"; fail=1; break
   fi
   if grep -q "\[Village\] Village: .*objects built" "$OUT/logcat-full.txt"; then
-    ready=1; log "village built after ~$((i*5)) s: $(grep -o '\[Village\] Village: .*' "$OUT/logcat-full.txt" | head -1)"; break
+    ready=1; log "village built after ~$((i*5)) s: $(grep -o '\[Village\] Village: [0-9]* objects built.*' "$OUT/logcat-full.txt" | tail -1)"; break
   fi
   if [ $((i % 6)) -eq 0 ]; then shot "00-load-$((i*5))s"; fi
 done
@@ -123,6 +123,15 @@ if grep -qE "ANR in $PKG" "$OUT/logcat-full.txt"; then log "WARN: ANR reported f
 big=$(find "$OUT" -name 'shot-*-play.png' -size +40k | wc -l)
 log "gameplay screenshots > 40 KB (non-black): $big"
 [ "$big" -lt 2 ] && { log "FAIL: gameplay screenshots look blank/black"; fail=1; }
+# Frozen-game check: all gameplay screenshots byte-identical = nothing moved.
+nplay=$(find "$OUT" -name 'shot-*-play.png' | wc -l)
+uniq=$(find "$OUT" -name 'shot-*-play.png' -exec md5sum {} + | awk '{print $1}' | sort -u | wc -l)
+log "gameplay screenshots: $nplay, distinct: $uniq"
+[ "$nplay" -ge 2 ] && [ "$uniq" -lt 2 ] && { log "FAIL: all gameplay screenshots are byte-identical (game frozen)"; fail=1; }
+# Build diagnostics.
+log "build stats: $(grep -o '\[Village\] BuildStats:.*' "$OUT/logcat-full.txt" | tail -1)"
+grep -q "build timed out" "$OUT/logcat-full.txt" && log "WARN: village build hit its deadline (partial village)"
+log "E/Unity lines: $(grep -c ' E/Unity' "$OUT/logcat-full.txt"), missing-class errors: $(grep -c "Can't add component because class" "$OUT/logcat-full.txt"), gltf skipped/failed: $(grep -cE '\[Gltf\] (Skipped|Load failed|Load TIMEOUT|Instantiate)' "$OUT/logcat-full.txt"), ktx errors: $(grep -ciE 'ktx|basisu' "$OUT/logcat-full.txt" | head -1)"
 ls -la "$OUT" | tee -a "$OUT/result.txt"
 [ $fail -eq 0 ] && log "RESULT: PASS" || log "RESULT: FAIL"
 exit $fail
