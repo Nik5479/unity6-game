@@ -1,0 +1,65 @@
+# Emulator visual check — runs the released APK on GitHub's free computer
+# (ubuntu-latest runner, KVM on, Android 11 x86_64 emulator, 4 GB RAM,
+# headless -no-window), installs the APK, launches it and takes screenshots.
+# Same approach the other Muse uses — our own machine has no KVM/GPU, so the
+# visual check happens here instead of on the phone.
+#
+# How to run: GitHub repo -> Actions -> "Emulator test (APK visual check)"
+# -> Run workflow -> pick the release tag (e.g. v1.0.3) -> Run.
+# Screenshots land in the run's artifacts as emulator-shots-<tag>.
+
+name: Emulator test (APK visual check)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_tag:
+        description: 'Release tag to test (e.g. v1.0.3)'
+        required: true
+        default: 'v1.0.3'
+
+jobs:
+  emulator-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Download APK from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.apk_tag }}" --repo Nik5479/unity6-game --pattern 'unity6-game.apk'
+          ls -lh unity6-game.apk
+          file unity6-game.apk
+
+      - name: Install APK on emulator and take screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis_playstore
+          arch: x86_64
+          ram-size: 4096M
+          heap-size: 512M
+          disk-size: 8192M
+          emulator-options: -no-window -no-snapshot -no-audio -gpu swiftshader_indirect -no-boot-anim
+          disable-animations: true
+          script: |
+            echo "--- installing APK (460 MB, takes a while) ---"
+            adb install -r -g unity6-game.apk
+            echo "--- launching game ---"
+            adb shell am start -n com.nik.forgottenvillage/com.unity3d.player.UnityPlayerActivity
+            echo "--- waiting for village to build (slow on emulator) ---"
+            sleep 180
+            adb exec-out screencap -p > shot-1.png
+            sleep 60
+            adb exec-out screencap -p > shot-2.png
+            ls -lh *.png
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-shots-${{ inputs.apk_tag }}
+          path: '*.png'
+          retention-days: 7
