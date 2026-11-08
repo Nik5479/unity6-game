@@ -85,10 +85,14 @@ public class CameraFollow : MonoBehaviour
         Vector3 headPos = target.position + Vector3.up * 1.4f;
         Vector3 toCam = want - headPos;
         float toCamDist = toCam.magnitude;
+        // Audit M1: test against the village's blocking volumes only (no
+        // unmasked Physics.Raycast that hit fence rails/crates and missed
+        // every glTF house).
+        float hitDist;
         if (toCamDist > 0.01f
-            && Physics.Raycast(headPos, toCam.normalized, out RaycastHit hit, toCamDist))
+            && VillageColliders.CameraRay(headPos, toCam.normalized, toCamDist, out hitDist))
         {
-            want = hit.point - toCam.normalized * 0.4f;
+            want = headPos + toCam.normalized * hitDist - toCam.normalized * 0.4f;
             if (Vector3.Distance(want, headPos) < 1.2f)
                 want = headPos + toCam.normalized * 1.2f;
         }

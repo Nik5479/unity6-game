@@ -5,7 +5,7 @@ using UnityEngine.UI;
 /// <summary>
 /// Mobile controls + HUD, built entirely at runtime (no hand-written
 /// UI scene YAML). Creates:
-///  - Canvas (ScreenSpaceCamera, so CI screenshots capture the UI) + EventSystem
+///  - Canvas (ScreenSpaceOverlay + SafeArea panel) + EventSystem
 ///  - virtual joystick (bottom-left), buttons RUN / JUMP / ACTION /
 ///    TORCH / LOCK (bottom-right + top-right)
 ///  - subtitle line (monster's mimicked voice), objective (top-left),
@@ -227,23 +227,14 @@ public class MobileControls : MonoBehaviour
 
     private void BuildUI()
     {
-        // Canvas — Screen Space - CAMERA (not Overlay) so Camera.Render
-        // captures the UI in CI screenshots, and the UI always sits in
-        // front of the 3D world at a fixed distance from the gameplay camera.
+        // Canvas — Screen Space - OVERLAY (audit H1): the HUD used to sit on
+        // a ScreenSpaceCamera canvas, so URP post-processing (tonemapping,
+        // bloom, vignette) and MSAA ran over the controls and a wall closer
+        // than 1 m could cover them. Overlay draws after the camera stack.
+        // CI screenshots use adb screencap, which captures overlay UI too.
         GameObject canvasGO = new GameObject("MobileCanvas");
         Canvas canvas = canvasGO.AddComponent<Canvas>();
-        Camera uiCam = Camera.main;
-        if (uiCam != null)
-        {
-            canvas.renderMode = RenderMode.ScreenSpaceCamera;
-            canvas.worldCamera = uiCam;
-            canvas.planeDistance = 1f;
-        }
-        else
-        {
-            Debug.LogWarning("[MobileControls] No Main Camera for UI canvas — falling back to Overlay");
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        }
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = 10;
         CanvasScaler scaler = canvasGO.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -251,13 +242,26 @@ public class MobileControls : MonoBehaviour
         scaler.matchWidthOrHeight = 0.5f;
         canvasGO.AddComponent<GraphicRaycaster>();
 
+        // Safe area (audit M5): every HUD element lives under a panel that
+        // is fitted to Screen.safeArea, so notches / rounded corners never
+        // cover the TORCH/LOCK buttons or the objective text.
+        GameObject safeGO = new GameObject("SafeArea", typeof(RectTransform));
+        RectTransform safeRect = safeGO.GetComponent<RectTransform>();
+        safeRect.SetParent(canvasGO.transform, false);
+        safeRect.anchorMin = Vector2.zero;
+        safeRect.anchorMax = Vector2.one;
+        safeRect.offsetMin = Vector2.zero;
+        safeRect.offsetMax = Vector2.zero;
+        safeGO.AddComponent<SafeAreaFitter>();
+        Transform hudRoot = safeRect;
+
         // EventSystem (needed for touch buttons / joystick).
         GameObject esGO = new GameObject("EventSystem");
         esGO.AddComponent<EventSystem>();
         esGO.AddComponent<StandaloneInputModule>();
 
         // Objective (top-left).
-        objectiveText = MakeText(canvasGO.transform, "Objective", new Vector2(0f, 1f), new Vector2(0f, 1f),
+        objectiveText = MakeText(hudRoot, "Objective", new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(16f, -16f), new Vector2(900f, 44f), 24, TextAnchor.UpperLeft,
             "Bhairavpur — Nilesh");
         Shadow objSh = objectiveText.gameObject.AddComponent<Shadow>();
@@ -267,14 +271,14 @@ public class MobileControls : MonoBehaviour
         // Subtitle (bottom-centre, ABOVE the button row: y=210 clears the
         // joystick top (182) and RUN button top (165) — controls redesign
         // shrank the controls, so the subtitle moved down from y=300).
-        subtitleText = MakeText(canvasGO.transform, "Subtitle", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+        subtitleText = MakeText(hudRoot, "Subtitle", new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
             new Vector2(0f, 210f), new Vector2(900f, 70f), 26, TextAnchor.MiddleCenter, "");
         Shadow sh = subtitleText.gameObject.AddComponent<Shadow>();
         sh.effectColor = new Color(0f, 0f, 0f, 0.9f);
         sh.effectDistance = new Vector2(2f, -2f);
 
         // Centre announcement (hidden).
-        centerText = MakeText(canvasGO.transform, "CenterText", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+        centerText = MakeText(hudRoot, "CenterText", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
             new Vector2(0f, 60f), new Vector2(1000f, 160f), 44, TextAnchor.MiddleCenter, "");
         Shadow ctrSh = centerText.gameObject.AddComponent<Shadow>();
         ctrSh.effectColor = new Color(0f, 0f, 0f, 0.9f);
@@ -282,7 +286,7 @@ public class MobileControls : MonoBehaviour
         centerText.gameObject.SetActive(false);
 
         // Restart button (hidden).
-        restartButton = MakeButton(canvasGO.transform, "Restart", "DOBARA KHELO",
+        restartButton = MakeButton(hudRoot, "Restart", "DOBARA KHELO",
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -90f), new Vector2(260f, 80f), 28);
         restartButton.onClick.AddListener(delegate
         {
@@ -299,7 +303,7 @@ public class MobileControls : MonoBehaviour
         // knob, so the knob is added FIRST; ring + triangles come after.
         GameObject joyBG = new GameObject("Joystick");
         RectTransform joyRect = joyBG.AddComponent<RectTransform>();
-        joyRect.SetParent(canvasGO.transform, false);
+        joyRect.SetParent(hudRoot, false);
         joyRect.anchorMin = new Vector2(0f, 0f);
         joyRect.anchorMax = new Vector2(0f, 0f);
         joyRect.anchoredPosition = new Vector2(112f, 112f);
@@ -343,23 +347,23 @@ public class MobileControls : MonoBehaviour
         // Jump/Run 100->66, Torch/Lock 90->60), tighter cluster, icons
         // bigger relative to the button (72%, was 62%) + a light rim so
         // the symbols read clearly. Same anchors/functions as before.
-        Button actionBtn = MakeIconButton(canvasGO.transform, "ActionBtn", ControlIcons.IconKind.Hand,
+        Button actionBtn = MakeIconButton(hudRoot, "ActionBtn", ControlIcons.IconKind.Hand,
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-62f, 62f), new Vector2(86f, 86f));
         actionBtn.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (player != null) player.Interact(); });
 
-        Button jumpBtn = MakeIconButton(canvasGO.transform, "JumpBtn", ControlIcons.IconKind.Jump,
+        Button jumpBtn = MakeIconButton(hudRoot, "JumpBtn", ControlIcons.IconKind.Jump,
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-158f, 56f), new Vector2(66f, 66f));
         jumpBtn.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (player != null) player.Jump(); });
 
-        Button runBtn = MakeIconButton(canvasGO.transform, "RunBtn", ControlIcons.IconKind.Run,
+        Button runBtn = MakeIconButton(hudRoot, "RunBtn", ControlIcons.IconKind.Run,
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-158f, 132f), new Vector2(66f, 66f));
         AddHold(runBtn, delegate(bool held) { if (player != null) player.runHeld = held; });
 
-        torchButton = MakeIconButton(canvasGO.transform, "TorchBtn", ControlIcons.IconKind.Flame,
+        torchButton = MakeIconButton(hudRoot, "TorchBtn", ControlIcons.IconKind.Flame,
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-54f, -32f), new Vector2(60f, 60f));
         torchButton.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (torch != null) torch.Toggle(); });
 
-        lockButton = MakeIconButton(canvasGO.transform, "LockBtn", ControlIcons.IconKind.Lock,
+        lockButton = MakeIconButton(hudRoot, "LockBtn", ControlIcons.IconKind.Lock,
             new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-154f, -32f), new Vector2(60f, 60f));
         lockButton.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (gameManager != null) gameManager.ToggleLock(); });
     }

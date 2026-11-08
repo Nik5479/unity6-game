@@ -1,0 +1,19 @@
+<!--
+  Engine-code stripping (stripEngineCode: 1) removed CapsuleCollider and
+  SphereCollider because no scene references them; GameObject.CreatePrimitive
+  then failed with "Can't add component because class 'CapsuleCollider'
+  doesn't exist!" (audit H4). Keep the physics classes created from code.
+-->
+<linker>
+  <assembly fullname="UnityEngine.PhysicsModule">
+    <type fullname="UnityEngine.CapsuleCollider" preserve="all"/>
+    <type fullname="UnityEngine.SphereCollider" preserve="all"/>
+    <type fullname="UnityEngine.BoxCollider" preserve="all"/>
+    <type fullname="UnityEngine.MeshCollider" preserve="all"/>
+    <type fullname="UnityEngine.Rigidbody" preserve="all"/>
+    <type fullname="UnityEngine.CharacterController" preserve="all"/>
+  </assembly>
+  <assembly fullname="UnityEngine.CoreModule">
+    <type fullname="UnityEngine.LODGroup" preserve="all"/>
+  </assembly>
+</linker>

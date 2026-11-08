@@ -46,11 +46,23 @@ public class NileshAnimator : MonoBehaviour
             enabled = false;
             return;
         }
-        anim["NileshIdle"].wrapMode = WrapMode.Loop;
-        anim["NileshWalk"].wrapMode = WrapMode.Loop;
-        anim["NileshRun"].wrapMode = WrapMode.Loop;
+        // Null-guard each clip: a missing Walk/Run clip must not throw in
+        // Start and freeze Nilesh (audit M6). Missing ones fall back below.
+        SetLoop("NileshIdle");
+        hasWalk = SetLoop("NileshWalk");
+        hasRun = SetLoop("NileshRun");
         anim.Play("NileshIdle");
         current = "NileshIdle";
+    }
+
+    private bool hasWalk, hasRun;
+
+    private bool SetLoop(string name)
+    {
+        AnimationState st = anim[name];
+        if (st == null) return false;
+        st.wrapMode = WrapMode.Loop;
+        return true;
     }
 
     private void AddClip(string name)
@@ -79,6 +91,8 @@ public class NileshAnimator : MonoBehaviour
         // Walk speed is 5 m/s, run is 9 m/s (PlayerController).
         string want = "NileshIdle";
         if (speedSmooth > 0.4f) want = speedSmooth > 7f ? "NileshRun" : "NileshWalk";
+        if (want == "NileshRun" && !hasRun) want = hasWalk ? "NileshWalk" : "NileshIdle";
+        if (want == "NileshWalk" && !hasWalk) want = "NileshIdle";
         if (want != current)
         {
             anim.CrossFade(want, kBlend);
