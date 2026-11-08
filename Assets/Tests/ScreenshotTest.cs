@@ -1,5 +1,6 @@
 using System.Collections;
 using System.IO;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -70,6 +71,16 @@ public class ScreenshotTest
         int childCount = village.GetComponentsInChildren<Transform>(true).Length - 1;
         Debug.Log("[Test] Village objects: " + childCount);
         Assert.Greater(childCount, 50, "Village has too few objects (" + childCount + ") — builder did not run");
+
+        // (a2) PILOT (2026-11-08): the opaque black puddle discs must be
+        // gone (replaced by transparent WaterPuddle discs) and the static
+        // Mukhiya must be out of the pilot area (by the haveli, x > 10).
+        Assert.IsNull(GameObject.Find("Puddle"), "Old opaque Puddle discs still present — pilot water fix missing");
+        Assert.IsNotNull(GameObject.Find("WaterPuddle"), "No WaterPuddle discs — pilot water fix missing");
+        GameObject mukhiya = GameObject.Find("Mukhiya");
+        if (mukhiya != null)
+            Assert.Greater(mukhiya.transform.position.x, 10f,
+                "Mukhiya still stands in the pilot area (x=" + mukhiya.transform.position.x + ")");
 
         // (b) Houses must be visible from the gameplay camera.
         Plane[] planes = GeometryUtility.CalculateFrustumPlanes(cam);
@@ -192,7 +203,33 @@ public class ScreenshotTest
         Assert.IsNotNull(shot2, "Screenshot 2 failed to render");
         Assert.IsTrue(File.Exists(shot2), "Screenshot 2 file missing: " + shot2);
 
-        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2);
+        // PILOT night shots: the reference images are NIGHT scenes and
+        // every screenshot so far was DAY. Drive the cycle to night and
+        // shoot the pilot from the gameplay camera (lamp + wet road) and
+        // from the south-east looking north-west (temple + moon). SkipToNight
+        // fires OnNightStart (monster activates) — the monster stands at
+        // the pilot's north edge (z=-19); that is the real night scene.
+        Component cycle = FindComponent("DayNightCycle");
+        Assert.IsNotNull(cycle, "DayNightCycle not found for night shot");
+        cycle.GetType().GetMethod("SkipToNight").Invoke(cycle, null);
+        yield return new WaitForSeconds(2f);
+        string shot3 = RenderScreenshot(cam, "main-scene-night.png", 1280, 720);
+        Assert.IsNotNull(shot3, "Night screenshot failed to render");
+        Assert.IsTrue(File.Exists(shot3), "Night screenshot file missing: " + shot3);
+
+        Behaviour follow2 = cam.GetComponent("CameraFollow") as Behaviour;
+        if (follow2 != null) follow2.enabled = false;
+        cam.transform.position = new Vector3(8f, 5f, 2f);
+        cam.transform.LookAt(new Vector3(-6f, 8f, -20f));
+        yield return null;
+        string shot4 = RenderScreenshot(cam, "main-scene-night2.png", 1280, 720);
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (follow2 != null) follow2.enabled = true;
+        Assert.IsNotNull(shot4, "Night angle-2 screenshot failed to render");
+        Assert.IsTrue(File.Exists(shot4), "Night angle-2 screenshot file missing: " + shot4);
+
+        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot3 + " | " + shot4);
         yield return null;
     }
 
@@ -229,5 +266,25 @@ public class ScreenshotTest
             Debug.LogWarning("Screenshot render failed: " + e.Message);
             return null;
         }
+    }
+
+    // Reflection helpers (test assembly cannot reference game classes).
+    private static System.Type FindType(string name)
+    {
+        foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var t = asm.GetType(name);
+            if (t != null) return t;
+        }
+        return null;
+    }
+
+    private static Component FindComponent(string typeName)
+    {
+        System.Type t = FindType(typeName);
+        if (t == null) return null;
+        Object[] found = Object.FindObjectsOfType(t);
+        if (found == null || found.Length == 0) return null;
+        return found[0] as Component;
     }
 }

@@ -139,7 +139,11 @@ public class VillageBuilder : MonoBehaviour
     public Pickup batteryPickup;
     // Fix-push P2-15: NPC spots (same constants as the LoadProp calls in
     // BuildNewModelsAsync, so the lines work even if a model fails to load).
-    private Vector3 mukhiyaPos = new Vector3(-3.5f, 0f, 2.5f);
+    // PILOT: Mukhiya stood at the chowk (-3.5, 2.5) as a STATIC unrigged
+    // NPC — a statue among living villagers. He moves to his haveli
+    // (13.5, -3.5), OUTSIDE the pilot bounds, where a standing elder by
+    // his own house is plausible. (Pilot bounds: x -12..+10, z -19..+17.)
+    private Vector3 mukhiyaPos = new Vector3(13.5f, 0f, -3.5f);
     private Vector3 meeraPos = new Vector3(0.5f, 0f, 6.5f);
     // (x 2 -> 3.6, 2026-11-07: the visual Pujari was moved 1.6 m east by
     // cheap-wins; the NPC trigger must sit on the visible priest.)
@@ -172,6 +176,7 @@ public class VillageBuilder : MonoBehaviour
     private Material matBrick;
     private Material matThatch;
     private Material matMudDry;
+    private Material matMudWet; // PILOT: darkened wet-lane variant of matMudDry.
     private Material matCobble;
     private Material matLeaves;
     private Material matWitheredGrass;
@@ -768,6 +773,41 @@ public class VillageBuilder : MonoBehaviour
         return m;
     }
 
+    // PILOT: add generic fine-grain PBR maps to a loaded .mat asset
+    // (plaster/wood/roof/stone/grass have no matched PBR sets in the
+    // repo). Mud's normal + metal-smooth are pattern-free at low bump,
+    // so they add surface grain without fake seams. No AO: a mismatched
+    // AO map would darken the wrong places.
+    private void UpgradeRuntimeMat(Material m, float bump)
+    {
+        if (m == null) return;
+        try
+        {
+            Texture2D normal = LoadTex("brown_mud_dry_nor_gl_1k");
+            Texture2D metalSmooth = LoadTex("brown_mud_dry_metal_smooth_1k");
+            Vector2 tiling = m.mainTextureScale;
+            if (normal != null)
+            {
+                m.SetTexture("_BumpMap", normal);
+                m.SetTextureScale("_BumpMap", tiling);
+                m.SetFloat("_BumpScale", bump);
+                m.EnableKeyword("_NORMALMAP");
+            }
+            if (metalSmooth != null)
+            {
+                m.SetTexture("_MetallicGlossMap", metalSmooth);
+                m.SetTextureScale("_MetallicGlossMap", tiling);
+                m.SetFloat("_Smoothness", 1f);
+                m.SetFloat("_SmoothnessTextureChannel", 0f);
+                m.EnableKeyword("_METALLICSPECGLOSSMAP");
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning("[Village] PBR upgrade failed for " + m.name + " — " + e.Message);
+        }
+    }
+
     private Material MakeFlat(string name, Color color, float smoothness)
     {
         Shader s = GetStandardShader();
@@ -835,6 +875,30 @@ public class VillageBuilder : MonoBehaviour
         AssignTex(matRoof, "roof_tiles", new Vector2(3f, 2f));
         AssignTex(matStone, "stone_wall", new Vector2(2f, 1f));
         AssignTex(matGrass, "field_grass", new Vector2(4f, 3f));
+
+        // PILOT 2026-11-08: the ground is the biggest surface in every
+        // screenshot and it was albedo-only (GroundMud.mat = ground_mud.jpg,
+        // no normal/roughness/AO). The whole 500 m plane is ONE object, so
+        // the pilot ground fix is a full PBR rebuild from the matched
+        // Poly Haven brown_mud_dry set (diff + normal + metal-smooth + AO),
+        // same 200x200 tiling (2.5 m/tile). The .mat assets for plaster /
+        // wood / roof / stone / grass have no matched PBR sets in the repo,
+        // so they get a generic fine-grain normal + metal-smooth (mud's,
+        // low bump) instead of mismatched pattern maps — surface grain
+        // without fake seams. matMudWet is the darkened wet-lane variant
+        // (reference: a wet road reads darker + shinier than dry ground).
+        matGround = MakeMat("GroundMudPBR", LoadTex("brown_mud_dry_diff_1k"), Color.white, 0.05f, new Vector2(200f, 200f),
+            LoadTex("brown_mud_dry_nor_gl_1k"), LoadTex("brown_mud_dry_metal_smooth_1k"), LoadTex("brown_mud_dry_ao_1k"));
+        UpgradeRuntimeMat(matPlaster, 0.3f);
+        UpgradeRuntimeMat(matWood, 0.35f);
+        UpgradeRuntimeMat(matRoof, 0.4f);
+        UpgradeRuntimeMat(matStone, 0.4f);
+        UpgradeRuntimeMat(matGrass, 0.3f);
+        if (matMudDry != null)
+        {
+            matMudWet = CloneTiledMaterial(matMudDry, 3f);
+            if (matMudWet != null) matMudWet.color = new Color(0.53f, 0.48f, 0.42f);
+        }
 
         // Resolve the lit shader once for the flat/emissive materials
         // (URP Lit under URP, Standard under Built-in — see GetStandardShader).
@@ -909,6 +973,45 @@ public class VillageBuilder : MonoBehaviour
         m.SetFloat("_Metallic", 0f);
         m.SetFloat("_Glossiness", 0f);
         m.SetFloat("_Smoothness", 0f);
+        return m;
+    }
+
+    // PILOT: real standing water — transparent, pale sky-blue over the mud
+    // (alpha 0.5), smoothness 1.0 so the sun/lamp glints on it, with a fine
+    // normal map for ripple sparkle. The old opaque dark discs reflected
+    // nothing (no reflection probe in the scene) and read as black ovals.
+    private Material MakeWaterMaterial()
+    {
+        Shader s = GetStandardShader();
+        if (s == null)
+        {
+            Debug.LogWarning("[Village] Standard shader not available for WaterPuddle");
+            return null;
+        }
+        Material m = new Material(s);
+        m.name = "WaterPuddle";
+        m.color = new Color(0.55f, 0.63f, 0.72f, 0.5f);
+        m.SetFloat("_Mode", 3f);
+        m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        m.SetInt("_ZWrite", 0);
+        m.DisableKeyword("_ALPHATEST_ON");
+        m.EnableKeyword("_ALPHABLEND_ON");
+        m.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        m.SetFloat("_Surface", 1f);
+        m.SetFloat("_Blend", 0f);
+        m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        m.renderQueue = 3000;
+        m.SetFloat("_Metallic", 0f);
+        m.SetFloat("_Glossiness", 1f);
+        m.SetFloat("_Smoothness", 1f);
+        Texture2D ripple = LoadTex("brown_mud_dry_nor_gl_1k");
+        if (ripple != null)
+        {
+            m.SetTexture("_BumpMap", ripple);
+            m.SetFloat("_BumpScale", 0.15f);
+            m.EnableKeyword("_NORMALMAP");
+        }
         return m;
     }
 
@@ -1131,7 +1234,10 @@ public class VillageBuilder : MonoBehaviour
         // alternated mud / ground-mud, but the two materials tile at
         // different rates (mud 3x, ground 200x), so the lane read as a
         // checkerboard of flat rectangles instead of one worn track.
-        Material dirt = (matMudDry != null)
+        // PILOT: wet lanes — darkened mud (the reference road is wet,
+        // darker + shinier than the dry ground around it).
+        Material dirt = (matMudWet != null) ? matMudWet
+            : (matMudDry != null)
             ? matMudDry
             : MakeFlat("DirtPath", new Color(0.45f, 0.35f, 0.24f), 0.05f);
         for (int i = 0; i < 6; i++)
@@ -1167,44 +1273,43 @@ public class VillageBuilder : MonoBehaviour
         // specular streaks along the road instead of the lane reading
         // matte. Alpha is deliberately low (0.13) — it must glint, not
         // paint the lane black.
-        // (b) real puddles (below): dark slate discs, smoothness 0.95 +
-        // a little metal so the reflection probe + sun/lamp specular make
-        // them glint instead of reading as black holes. They sit at
-        // y=0.05, above the sheen (0.038) and the lane patches (0.03).
-        Material sheenMat = MakeTransparent("WetSheen", new Color(0.05f, 0.06f, 0.09f, 0.13f));
+        // (b) real puddles (below): transparent sky-tinted water discs,
+        // smoothness 1.0 — the old opaque dark discs read as black holes,
+        // so they are gone.
+        // PILOT: the sheen was near-black (0.05,0.06,0.09) — it read as
+        // dirty strips; now a pale sky tint so it glints instead of
+        // darkening the lane.
+        Material sheenMat = MakeTransparent("WetSheen", new Color(0.42f, 0.50f, 0.58f, 0.10f));
         if (sheenMat != null)
         {
-            sheenMat.SetFloat("_Smoothness", 0.9f);
-            sheenMat.SetFloat("_Glossiness", 0.9f);
+            sheenMat.SetFloat("_Smoothness", 1f);
+            sheenMat.SetFloat("_Glossiness", 1f);
             GameObject sheenNS = Box("WetSheenNS", new Vector3(0f, 0.038f, 2f), new Vector3(2.6f, 0.01f, 24f), sheenMat, villageRoot);
             Destroy(sheenNS.GetComponent<Collider>());
             GameObject sheenEW = Box("WetSheenEW", new Vector3(0f, 0.038f, 7f), new Vector3(20f, 0.01f, 2.6f), sheenMat, villageRoot);
             Destroy(sheenEW.GetComponent<Collider>());
         }
 
-        // PUDDLES — the reference's single strongest cue: standing water
-        // all down the road, reflecting the sky by day and the lamps +
-        // moon by night. 9 discs on both lanes (was 5 small ones in the
-        // middle of the chowk, which read as black oval blobs because
-        // they were tiny, pure-black and matte). Bigger (1.6-2.65 m
-        // across), slate blue-grey instead of near-black, smoothness
-        // 0.95 and a touch of metal so the reflection probe gives them
-        // a sky sheen.
-        Material puddleMat = MakeFlat("Puddle", new Color(0.09f, 0.11f, 0.15f), 0.95f);
-        if (puddleMat != null) puddleMat.SetFloat("_Metallic", 0.2f);
+        // PUDDLES — PILOT: the old puddles were opaque near-black discs
+        // (0.09,0.11,0.15 + metallic 0.2, no reflection probe in the scene)
+        // — with nothing to reflect they rendered as flat black ovals in
+        // CI and white ovals in the emulator. They are GONE. Real standing
+        // water is transparent: a pale sky-blue disc (alpha 0.5) over the
+        // mud, smoothness 1.0 so the sun/lamp glints on it. Smaller
+        // (0.8-1.4 m) and only 6, on the lanes — a village road has
+        // puddles, not black holes.
+        Material waterMat = MakeWaterMaterial();
         Vector3[] puddleSpots = new Vector3[]
         {
-            new Vector3(0.8f, 0.05f, 2.5f), new Vector3(-0.9f, 0.05f, -4f),
-            new Vector3(1.2f, 0.05f, -8.5f), new Vector3(-0.6f, 0.05f, 10.5f),
-            new Vector3(0.5f, 0.05f, 14.5f),
-            new Vector3(3.6f, 0.05f, 0.4f), new Vector3(-4.5f, 0.05f, 7.5f),
-            new Vector3(7.5f, 0.05f, 6.8f), new Vector3(-6.5f, 0.05f, 11f),
+            new Vector3(0.8f, 0.045f, 2.5f), new Vector3(-0.9f, 0.045f, -4f),
+            new Vector3(1.2f, 0.045f, -8.5f), new Vector3(-0.6f, 0.045f, 10.5f),
+            new Vector3(3.6f, 0.045f, 0.4f), new Vector3(-4.5f, 0.045f, 7.5f),
         };
         for (int i = 0; i < puddleSpots.Length; i++)
         {
-            float r = 1.6f + (i % 4) * 0.35f;
-            GameObject puddle = Cylinder("Puddle", puddleSpots[i],
-                new Vector3(r, 0.02f, r * (0.7f + (i % 2) * 0.25f)), puddleMat, villageRoot);
+            float r = 0.8f + (i % 4) * 0.2f;
+            GameObject puddle = Cylinder("WaterPuddle", puddleSpots[i],
+                new Vector3(r, 0.02f, r * (0.7f + (i % 2) * 0.25f)), waterMat, villageRoot);
             puddle.transform.rotation = Quaternion.Euler(0f, (i * 53) % 180f, 0f);
             Destroy(puddle.GetComponent<Collider>());
         }
@@ -1534,10 +1639,12 @@ public class VillageBuilder : MonoBehaviour
             GltfModelLoader.ColliderMode.None, g => hut = g);
         if (hut != null)
         {
-            // Phase 2: the hut's main texture reads as a flat saturated
-            // orange slab in daylight (Phase 1 screenshot). Mute it
-            // toward weathered terracotta — see MuteOrangePlaster.
-            MuteOrangePlaster(hut, "Material.002");
+            // PILOT: the hut's walls are one orange plaster texture and the
+            // Phase 2 tint (x0.78/0.74/0.68) barely dented it — the walls
+            // stayed bright orange-red in the fix-round screenshot. A colour
+            // multiplier cannot fix a saturated texture, so the walls get
+            // a real PBR re-texture — see WeatherHutPlaster.
+            WeatherHutPlaster(hut);
             Bounds hb = GetWorldBounds(hut);
             float w = hb.size.x;
             float d = hb.size.z;
@@ -2274,6 +2381,106 @@ public class VillageBuilder : MonoBehaviour
         Debug.Log("[Village] Orange plaster muted on " + holder.name + " (" + materialName + ")");
     }
 
+    // PILOT: the hut's walls are ONE orange plaster texture (Material.002,
+    // the only textured wall material — the 4 big bool meshes are the
+    // thatch roof, the 5 cubes are the dark-wood frame) and the Phase 2
+    // tint (x0.78/0.74/0.68 on the base colour) barely dented it — the
+    // walls stayed bright orange-red in the fix-round screenshot. A colour
+    // multiplier cannot fix a saturated texture, so the wall gets a REAL
+    // PBR treatment: the muted clay-block Poly Haven set (diff + normal +
+    // metal-smooth + AO) replaces the orange base map, tinted warm
+    // grey-brown. The thatch roof (Material.001) is untouched.
+    private static void WeatherHutPlaster(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D albedo = Tex("clay_block_wall_diff_1k");
+        Texture2D normal = Tex("clay_block_wall_nor_gl_1k");
+        Texture2D metalSmooth = Tex("clay_block_wall_metal_smooth_1k");
+        Texture2D ao = Tex("clay_block_wall_ao_1k");
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null) continue;
+                // Diagnostics: if the orange persists in the next CI shot,
+                // this log says which material actually carries it.
+                Debug.Log("[Village] Hut material: " + m.name + " baseColor=" +
+                    (m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor").ToString("F2") : "?") +
+                    " hasBaseMap=" + (m.mainTexture != null));
+                if (m.name != "Material.002") continue;
+                ToUrpLit(m);
+                if (albedo != null) m.SetTexture("_BaseMap", albedo);
+                m.SetTextureScale("_BaseMap", new Vector2(3f, 2f));
+                m.SetColor("_BaseColor", new Color(0.88f, 0.82f, 0.70f));
+                if (normal != null)
+                {
+                    m.SetTexture("_BumpMap", normal);
+                    m.SetTextureScale("_BumpMap", new Vector2(3f, 2f));
+                    m.SetFloat("_BumpScale", 1f);
+                    m.EnableKeyword("_NORMALMAP");
+                }
+                if (metalSmooth != null)
+                {
+                    m.SetTexture("_MetallicGlossMap", metalSmooth);
+                    m.SetTextureScale("_MetallicGlossMap", new Vector2(3f, 2f));
+                    m.SetFloat("_Smoothness", 1f);
+                    m.SetFloat("_SmoothnessTextureChannel", 0f);
+                    m.EnableKeyword("_METALLICSPECGLOSSMAP");
+                }
+                if (ao != null)
+                {
+                    m.SetTexture("_OcclusionMap", ao);
+                    m.SetTextureScale("_OcclusionMap", new Vector2(3f, 2f));
+                    m.SetFloat("_OcclusionStrength", 1f);
+                    m.EnableKeyword("_OCCLUSIONMAP");
+                }
+            }
+        }
+        Debug.Log("[Village] Hut walls re-textured (clay PBR) on " + holder.name);
+    }
+
+    // PILOT: the Pujari renders as a flat white sheet because his biggest
+    // mesh (Cylinder_Material.001, ~6k tris — the dhoti/lower body) is an
+    // UNTEXTURED flat [0.8,0.8,0.8] grey, and the small orange cylinder
+    // (Material.002) is flat saturated orange. Verified in the .glb, not
+    // a loader bug: only 3 of his 9 materials have textures (face,
+    // outfit top, one more). The dhoti gets a warm cream tint + fine
+    // normal grain so it reads as cloth instead of a white sheet; the
+    // orange pot is muted to terracotta. Face / textured mats untouched.
+    private static void FixPujari(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D normal = Tex("brown_mud_dry_nor_gl_1k");
+        System.Collections.Generic.HashSet<Material> seen =
+            new System.Collections.Generic.HashSet<Material>();
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null || !seen.Add(m)) continue;
+                if (m.name == "Material.001")
+                {
+                    ToUrpLit(m);
+                    m.SetColor("_BaseColor", new Color(0.78f, 0.72f, 0.60f));
+                    m.SetFloat("_Smoothness", 0.55f);
+                    if (normal != null)
+                    {
+                        m.SetTexture("_BumpMap", normal);
+                        m.SetFloat("_BumpScale", 0.35f);
+                        m.EnableKeyword("_NORMALMAP");
+                    }
+                }
+                else if (m.name == "Material.002")
+                {
+                    ToUrpLit(m);
+                    m.SetColor("_BaseColor", new Color(0.55f, 0.30f, 0.12f));
+                    m.SetFloat("_Smoothness", 0.5f);
+                }
+            }
+        }
+        Debug.Log("[Village] Pujari cloth fix applied");
+    }
+
     // Bullock cart: 2 materials, zero textures. Weathered wood PBR from
     // Poly Haven bark (albedo) + mud normal/metal-smooth (bark's own
     // normal/roughness maps were never downloaded — mud's fine-grain
@@ -2356,14 +2563,19 @@ public class VillageBuilder : MonoBehaviour
     }
 
     // Ambassador: full PBR but showroom-clean. Weather it with mud detail
-    // maps (grime over the paint) + a darkened, slightly browned paint
-    // colour + matte smoothness, so it reads as the broken-down car.
-    // Lighting pass 2026-11-07: the first weathering went TOO FAR — the
-    // car rendered near-black in the close-up. Now it is lightened
-    // instead of darkened (paint x1.08/1.04/1.0), the mud detail is much
-    // subtler (0.15, was 0.35) and the paint has a little sheen (0.5, was
-    // 0.35) so it catches the gate lantern and reads as a dark-green
-    // vintage car, not a black blob.
+    // maps (grime over the paint) + matte smoothness, so it reads as the
+    // broken-down car.
+    // PILOT: the old weathering multiplied the base colour x2.2 — that blew
+    // the texture's colours out, so the wheels read bright YELLOW and the
+    // doors vivid RED (toy car). The paint lives in the TEXTURE, so the
+    // multiplier is gone (base colour back to 1.0) and the mud detail stays
+    // subtle. The wheels share the body's ONE material (blinn1 — verified
+    // in the .glb: all 4 wheel meshes + body use blinn1), so wheels cannot
+    // be fixed by material name: the 4 wheel meshes get their own
+    // dark-rubber material by MESH name instead. If the doors still read
+    // red in the CI render, the red is painted in the body texture itself
+    // and the car must be REMOVED (replacement model needed) — code cannot
+    // repaint one part of a shared texture.
     private static void WeatherAmbassador(GameObject holder)
     {
         if (holder == null) return;
@@ -2377,20 +2589,16 @@ public class VillageBuilder : MonoBehaviour
             {
                 if (m == null || !seen.Add(m)) continue;
                 ToUrpLit(m);
-                // The Ambassador's dark-green paint lives in its TEXTURE
-                // (blinn1's baseColorFactor is null — the material colour
-                // is white), so the old 1.08x base-colour multiplier did
-                // nothing (attempt-20/22: the car stayed black at night).
-                // Brighten by raising the base colour ABOVE 1 — URP
-                // multiplies the texture by it. blinn1 is the body paint
-                // (+ wheels, same material — the tyres go dark grey,
-                // acceptable); blinn2 is the glass/chrome and is left
-                // alone so the windows stay dark.
+                // blinn1 is the body paint (+ wheels, same material);
+                // blinn2 is the glass/chrome and is left alone so the
+                // windows stay dark.
                 bool isBody = m.name.StartsWith("blinn1");
-                m.SetFloat("_Smoothness", 0.5f);
+                m.SetFloat("_Smoothness", isBody ? 0.45f : 0.9f);
                 if (isBody)
                 {
-                    m.SetColor("_BaseColor", new Color(2.2f, 2.2f, 2.2f, 1f));
+                    // PILOT: base colour back to 1.0 — the old 2.2x
+                    // multiplier blew the yellow wheels / red doors out.
+                    m.SetColor("_BaseColor", Color.white);
                     if (mudAlbedo != null)
                     {
                         m.SetTexture("_DetailMap", mudAlbedo);
@@ -2405,7 +2613,38 @@ public class VillageBuilder : MonoBehaviour
                 }
             }
         }
-        Debug.Log("[Village] Ambassador weathering applied to " + seen.Count + " materials");
+        // PILOT: wheels share blinn1 with the body — override them by
+        // MESH name with real dark rubber.
+        Material wheelMat = null;
+        Shader lit = Shader.Find("Universal Render Pipeline/Lit");
+        if (lit != null)
+        {
+            wheelMat = new Material(lit);
+            wheelMat.name = "AmbassadorWheelRubber";
+            wheelMat.SetColor("_BaseColor", new Color(0.05f, 0.05f, 0.06f));
+            wheelMat.SetFloat("_Metallic", 0f);
+            wheelMat.SetFloat("_Smoothness", 0.15f);
+            Texture2D mudN = Tex("brown_mud_dry_nor_gl_1k");
+            if (mudN != null)
+            {
+                wheelMat.SetTexture("_BumpMap", mudN);
+                wheelMat.SetFloat("_BumpScale", 0.5f);
+                wheelMat.EnableKeyword("_NORMALMAP");
+            }
+        }
+        int wheels = 0;
+        if (wheelMat != null)
+        {
+            foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+            {
+                if (r.gameObject.name.ToLower().Contains("wheel"))
+                {
+                    r.sharedMaterial = wheelMat;
+                    wheels++;
+                }
+            }
+        }
+        Debug.Log("[Village] Ambassador weathering applied to " + seen.Count + " materials, wheels overridden: " + wheels);
     }
 
     // ------------------------------------------------------------------
@@ -2493,7 +2732,8 @@ public class VillageBuilder : MonoBehaviour
         // (Position NOT changed by this replacement — x stays 3.6.)
         yield return LoadProp("indian_man_in_dhoti__1__2_kfur.glb", "Pujari",
             new Vector3(4.5f, 0f, -8.5f), 270f, 1.75f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None,
+            g => { if (g != null) { FixPujari(g); g.AddComponent<PilotNpcIdle>(); } });
         // Fix pass 2026-11-08: yaw 180 faced EAST (south close-up
         // showed his face in profile pointing right) and yaw 90 faced
         // NORTH (south close-up showed only his back). Yaw 270 faces
@@ -2516,10 +2756,13 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(0.5f, 0f, 6.5f), 180f, 1.70f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         GltfModelLoader.PlayEmbeddedAnimations(GameObject.Find("Meera"));
-        // MUKHIYA (Meshy, free tier) — the old village headman, standing
-        // by the chowk near the well.
+        // MUKHIYA (Meshy, free tier) — the old village headman. PILOT: moved
+        // from the chowk (-3.5, 2.5) to his haveli (13.5, -3.5) — he is
+        // UNRIGGED (no skeleton, no animation), so he must not stand in
+        // the pilot area as a "living" NPC. By the haveli he reads as a
+        // static elder at his own house, outside the pilot bounds.
         yield return LoadProp("meshy_mukhiya_87_mky.glb", "Mukhiya",
-            new Vector3(-3.5f, 0f, 2.5f), 45f, 1.75f,
+            new Vector3(13.5f, 0f, -3.5f), 45f, 1.75f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // Chickens (user-made on Meshy) — placed ONCE (fix-push P0-4b:
         // was 3 copies of the same 2.4M-tri file; the file itself is
