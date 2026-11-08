@@ -162,6 +162,18 @@ public class VillageBuilder : MonoBehaviour
     // real hospital-bed model lands exactly where the primitive bed was).
     private Vector3 playerBedPos = new Vector3(-11f, 0f, 4.3f);
 
+    // FREEZE FIX 2026-11-08: the village build is ~50 sequential glTF
+    // loads. Editor: ~22 s. A budget phone (4 GB RAM, slow flash):
+    // minutes — and any single load that never returned stalled the whole
+    // chain forever, so SetupSystems never ran (no DayNightCycle, no
+    // GameManager) and the game sat frozen at "Village: building...
+    // Field OK" for 5+ min. The build now has a hard deadline: after it,
+    // remaining models are skipped and the game starts with whatever
+    // loaded. 90 s is ~4x the editor build time (so the editor/CI full
+    // build is unaffected) and still caps a budget phone's wait at a
+    // minute and a half.
+    private const float kBuildDeadlineSeconds = 90f;
+
     void Awake()
     {
         // Landscape lock (runtime belt-and-braces for ProjectSettings):
@@ -186,9 +198,24 @@ public class VillageBuilder : MonoBehaviour
         mainCam = Camera.main;
         villageRoot = new GameObject("Village").transform;
         CreateBootStatus();
+        // Camera + movement fix 2026-11-08 (user video, v1.0.2): wire the
+        // GTA camera and the joystick BEFORE the village build starts, so
+        // the user gets a third-person view and working controls from
+        // second 0 instead of a static camera with no controls for the
+        // whole ~10-30 s build (SetupSystems used to create both only at
+        // the end of the build, and in the video the build never finished
+        // in 33 s — so there was never a joystick at all).
+        SetupCameraAndUIEarly();
 
         // Each step is isolated: one failing step must not kill the village.
         AllModelsLoaded = false;
+        // Freeze fix: arm the build deadline and the per-model progress
+        // display (so the player sees models loading, not a frozen
+        // "Building..." line).
+        GltfModelLoader.BuildDeadline = Time.realtimeSinceStartup + kBuildDeadlineSeconds;
+        GltfModelLoader.DeadlineReached = false;
+        GltfModelLoader.LoadTimings.Clear();
+        GltfModelLoader.OnProgress = f => SetBootStatus("Village: building... " + f);
         RunStep("Materials", BuildMaterials);
         RunStep("Ground", BuildGround);
         RunStep("PlayerFigure", BuildPlayerFigure);
@@ -198,28 +225,72 @@ public class VillageBuilder : MonoBehaviour
         StartCoroutine(BuildVillageAsync());
     }
 
+    // Camera + movement fix 2026-11-08 (user video, v1.0.2): the follow
+    // camera and the joystick used to be created only in SetupSystems, at
+    // the END of the ~10-30 s village build — so for the whole build the
+    // user saw a static scene camera with no controls at all, and Nilesh
+    // could not move. They are wired here, before the build starts: a
+    // GTA-style third-person camera behind Nilesh + a working joystick
+    // from second 0. SetupSystems only fills in the parts that need the
+    // built village (torch, game manager) and never creates a second copy.
+    private void SetupCameraAndUIEarly()
+    {
+        GameObject player = GameObject.Find("Player");
+        PlayerController pc = (player != null) ? player.GetComponent<PlayerController>() : null;
+        if (pc != null)
+        {
+            pc.playerCamera = mainCam;
+        }
+
+        // Phase 4: wide 70-degree FOV so the gameplay camera sees the
+        // chowk and the street ahead (was the scene default 60).
+        if (mainCam != null)
+        {
+            mainCam.fieldOfView = 70f;
+        }
+
+        // Third-person follow camera (GTA values live in CameraFollow).
+        if (mainCam != null)
+        {
+            CameraFollow follow = mainCam.GetComponent<CameraFollow>();
+            if (follow == null)
+            {
+                follow = mainCam.gameObject.AddComponent<CameraFollow>();
+            }
+            follow.target = (player != null) ? player.transform : null;
+        }
+
+        // Mobile controls + HUD (joystick, buttons, subtitles).
+        MobileControls ui = gameObject.GetComponent<MobileControls>();
+        if (ui == null)
+        {
+            ui = gameObject.AddComponent<MobileControls>();
+        }
+        ui.player = pc;
+    }
+
     // Phase 3: async village build. Real Sketchfab models load one by one
     // (each with a primitive fallback); a failed model never kills the
     // village. SetupSystems/SceneAmbience run after everything is placed.
     private System.Collections.IEnumerator BuildVillageAsync()
     {
-        bool ok = false;
         try
         {
             yield return BuildPlayerModelAsync();
             yield return BuildHousesAsync();
             yield return BuildWellAndLampAsync();
+            // Freeze fix: the monster is gameplay-critical (the night
+            // knock IS the game) — load it early, while the deadline
+            // still allows it, instead of last (where a slow phone never
+            // reached it and the game started with the capsule fallback).
+            yield return BuildMonsterModelAsync();
             RunStep("Field", BuildField);
             yield return BuildJungleAndFencesAsync();
             yield return BuildPropsAsync();
             yield return BuildNewModelsAsync();
-            yield return BuildMonsterModelAsync();
             RunStep("WarmLights", BuildWarmLights);
             RunStep("CleanupStrays", CleanupStrays);
             RunStep("Moon", BuildMoon);
-            RunStep("SetupSystems", SetupSystems);
-            RunStep("SceneAmbience", SetupSceneAmbience);
-            ok = true;
         }
         finally
         {
@@ -228,17 +299,64 @@ public class VillageBuilder : MonoBehaviour
             AllModelsLoaded = true;
             GameObject signal = new GameObject("ModelsLoaded");
             signal.transform.SetParent(villageRoot, false);
+            // Freeze fix 2026-11-08: the game MUST start even when the
+            // build was cut short by the deadline (or a step threw) —
+            // SetupSystems creates the DayNightCycle + GameManager +
+            // MonsterKnock, and without it the game sat frozen at
+            // "Village: building... Field OK" for 5+ min on a 4 GB phone.
+            // FinishBuild is idempotent, so it can never wire the
+            // systems twice.
+            FinishBuild();
         }
-        if (ok)
+    }
+
+    // Runs the end-of-build wiring exactly once, with whatever loaded:
+    // DayNightCycle + GameManager + MonsterKnock + torch + UI fill-in,
+    // the final boot status (the "Building..." text must clear), the
+    // reflection probe, and the intro + camera check. Safe on a partial
+    // village: SetupSystems null-checks the player/door, and
+    // BuildMonster falls back to the capsule-man when the HellDemon
+    // never loaded.
+    private bool buildFinished;
+    private void FinishBuild()
+    {
+        if (buildFinished) return;
+        buildFinished = true;
+        // Teardown guard: if the scene is going away, do not wire systems.
+        if (villageRoot == null || gameObject == null || !gameObject.scene.isLoaded) return;
+        RunStep("SetupSystems", SetupSystems);
+        RunStep("SceneAmbience", SetupSceneAmbience);
+        bool cutShort = GltfModelLoader.DeadlineReached;
+        SetBootStatus("Village: " + CountVillageObjects() + " objects built"
+            + (cutShort ? " — build timed out, started with what loaded" : "")
+            + (buildErrors > 0 ? " (" + buildErrors + " step errors — see log)" : ""));
+        // One-time environment reflection for the village (URP fix):
+        // render the reflection probe now that every model is loaded.
+        SetupReflectionProbe();
+        StartCoroutine(IntroSequence());
+        StartCoroutine(VerifyCameraView());
+        if (cutShort)
         {
-            SetBootStatus("Village: " + CountVillageObjects() + " objects built"
-                + (buildErrors > 0 ? " (" + buildErrors + " step errors — see log)" : ""));
-            // One-time environment reflection for the village (URP fix):
-            // render the reflection probe now that every model is loaded.
-            SetupReflectionProbe();
-            StartCoroutine(IntroSequence());
-            StartCoroutine(VerifyCameraView());
+            Debug.LogWarning("[Village] Build cut short by the " + kBuildDeadlineSeconds
+                + "s deadline — game started with a partial village. Slowest loads: "
+                + SlowestLoads(5));
         }
+    }
+
+    // Slowest model loads, for the deadline log ("file: 12.3s, ...").
+    private string SlowestLoads(int n)
+    {
+        var list = new System.Collections.Generic.List<string>(GltfModelLoader.LoadTimings);
+        list.Sort((a, b) => ParseLoadSeconds(b).CompareTo(ParseLoadSeconds(a)));
+        return string.Join(", ", list.GetRange(0, System.Math.Min(n, list.Count)).ToArray());
+    }
+
+    private float ParseLoadSeconds(string entry)
+    {
+        int c = entry.LastIndexOf(':');
+        float v;
+        if (c >= 0 && float.TryParse(entry.Substring(c + 1).Trim().TrimEnd('s'), out v)) return v;
+        return 0f;
     }
 
     // Runs one build step; a failure is logged and the build continues.
@@ -338,10 +456,12 @@ public class VillageBuilder : MonoBehaviour
                 }
             }
             Debug.Log("[Village] Camera check: player visible=" + playerVisible + ", houses visible=" + housesVisible);
-            // Same bar as the CI screenshot test (>= 3 houses): if the
-            // view fails, reset to the starter view instead of showing
-            // an empty frame.
-            if (!playerVisible || housesVisible < 3)
+            // GTA camera fix 2026-11-08: the bar is >= 1 house, not >= 3.
+            // The old >= 3 bar belonged to the high top-down camera; the
+            // GTA camera sits 4.5 m behind Nilesh and shows the chowk +
+            // the nearest house(s). Resetting to the starter view on a
+            // close-up framing would bring back the top-down look.
+            if (!playerVisible || housesVisible < 1)
             {
                 Debug.LogWarning("[Village] Camera view check FAILED — resetting to starter view");
                 SetBootStatus("Camera view failed — reset to starter view");
@@ -2263,9 +2383,15 @@ public class VillageBuilder : MonoBehaviour
             mainCam.fieldOfView = 70f;
         }
 
-        // Third-person follow camera.
-        CameraFollow follow = mainCam.gameObject.AddComponent<CameraFollow>();
-        follow.target = (player != null) ? player.transform : null;
+        // Third-person follow camera (created early in Awake by
+        // SetupCameraAndUIEarly — only add it here if it is missing, so
+        // there is never a second CameraFollow on the camera).
+        CameraFollow follow = mainCam.GetComponent<CameraFollow>();
+        if (follow == null)
+        {
+            follow = mainCam.gameObject.AddComponent<CameraFollow>();
+            follow.target = (player != null) ? player.transform : null;
+        }
 
         // Torch (spotlight attached to the camera).
         TorchController torch = gameObject.AddComponent<TorchController>();
@@ -2315,7 +2441,14 @@ public class VillageBuilder : MonoBehaviour
         gm.npcMeeraPos = meeraPos;
         gm.npcPujariPos = pujariPos;
 
-        MobileControls ui = gameObject.AddComponent<MobileControls>();
+        // Mobile controls (created early in Awake by SetupCameraAndUIEarly
+        // — only fill in the parts that need the built village here, never
+        // create a second copy).
+        MobileControls ui = gameObject.GetComponent<MobileControls>();
+        if (ui == null)
+        {
+            ui = gameObject.AddComponent<MobileControls>();
+        }
         ui.player = pc;
         ui.torch = torch;
         ui.gameManager = gm;

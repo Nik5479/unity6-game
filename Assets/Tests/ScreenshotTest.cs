@@ -86,7 +86,17 @@ public class ScreenshotTest
             }
         }
         Debug.Log("[Test] Houses visible from camera: " + housesVisible);
-        Assert.GreaterOrEqual(housesVisible, 3, "Fewer than 3 houses visible from main camera");
+        // GTA camera fix 2026-11-08: the bar is >= 1 house, not >= 3.
+        // The old >= 3 bar belonged to the high top-down camera (distance
+        // 9 / height 4.6); the GTA camera sits 4.5 m behind Nilesh and
+        // shows the chowk + the nearest house(s). What must never regress
+        // is the player being in frame — a third-person camera that loses
+        // its hero is broken.
+        Assert.GreaterOrEqual(housesVisible, 1, "No house visible from main camera");
+        Renderer playerRenderer = player.GetComponentInChildren<Renderer>();
+        Assert.IsNotNull(playerRenderer, "Player has no renderer to check visibility");
+        Assert.IsTrue(GeometryUtility.TestPlanesAABB(planes, playerRenderer.bounds),
+            "Player not visible from main camera — the follow camera lost its target");
 
         // (c) The mobile UI must exist with visible buttons.
         GameObject canvas = GameObject.Find("MobileCanvas");

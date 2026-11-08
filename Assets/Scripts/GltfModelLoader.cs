@@ -37,6 +37,28 @@ public static class GltfModelLoader
     private static readonly System.Collections.Generic.List<GltfImport> s_AliveImports
         = new System.Collections.Generic.List<GltfImport>();
 
+    // FREEZE FIX 2026-11-08 — two timeouts bound every load, so the
+    // village build can never hang the game again:
+    // (1) kLoadTimeoutSeconds: one load must never wait forever. Load()
+    //     and InstantiateMainSceneAsync used to be awaited with a bare
+    //     WaitUntil (no timeout), so a single stalled glTFast task (e.g.
+    //     a UnityWebRequest to a jar: URL that never returns) stalled
+    //     the whole build forever and the game never started.
+    // (2) BuildDeadline: VillageBuilder sets this to the wall-clock time
+    //     by which the whole build must finish; a load that starts (or is
+    //     still running) after it is skipped, so the game starts with
+    //     whatever loaded instead of waiting minutes on a budget phone.
+    // LoadTimings records every load's wall time for diagnostics — the
+    // slowest models are the first suspects when a phone build drags.
+    public const float kLoadTimeoutSeconds = 30f;
+    public static float BuildDeadline = float.PositiveInfinity;
+    public static bool DeadlineReached;
+    public static readonly System.Collections.Generic.List<string> LoadTimings =
+        new System.Collections.Generic.List<string>();
+    // Progress hook: VillageBuilder wires this to the boot status text so
+    // the player sees each model load instead of a frozen "Building...".
+    public static System.Action<string> OnProgress;
+
     // URP Unlit shader (cached). glTFast's Shader Graph "glTF-unlit" renders
     // pure black under URP (see the fix below) — those materials are swapped
     // to the built-in URP Unlit shader instead.
@@ -82,6 +104,18 @@ public static class GltfModelLoader
         holder.transform.position = pos;
         holder.transform.rotation = Quaternion.identity;
 
+        // Freeze fix: skip the load entirely once the build deadline has
+        // passed — the game starts with whatever already loaded.
+        if (Time.realtimeSinceStartup > BuildDeadline)
+        {
+            DeadlineReached = true;
+            Debug.LogWarning("[Gltf] Skipped (build deadline reached): " + fileName);
+            Object.Destroy(holder);
+            if (onDone != null) onDone(null);
+            yield break;
+        }
+        float loadStart = Time.realtimeSinceStartup;
+
         string fullPath = System.IO.Path.Combine(Application.streamingAssetsPath, "Models", fileName);
         var gltf = new GltfImport();
         Task<bool> loadTask = null;
@@ -115,7 +149,32 @@ public static class GltfModelLoader
             yield break;
         }
 
-        yield return new WaitUntil(() => loadTask.IsCompleted);
+        // Freeze fix: bounded wait, not WaitUntil — a stalled task must
+        // never hang the build. Abandoning a load mid-flight is safe:
+        // Load() only parses data (no scene objects are created until
+        // Instantiate), so a late-completing task just leaves parsed data
+        // behind. Do NOT Dispose the import here: the task may still be
+        // running on a background thread, and disposing under it risks a
+        // late-completing job writing into disposed state.
+        while (!loadTask.IsCompleted)
+        {
+            if (Time.realtimeSinceStartup > BuildDeadline)
+            {
+                DeadlineReached = true;
+                Debug.LogWarning("[Gltf] Load abandoned at build deadline: " + fileName + " — skipping");
+                Object.Destroy(holder);
+                if (onDone != null) onDone(null);
+                yield break;
+            }
+            if (Time.realtimeSinceStartup - loadStart > kLoadTimeoutSeconds)
+            {
+                Debug.LogWarning("[Gltf] Load TIMEOUT after " + kLoadTimeoutSeconds + "s: " + fileName + " — skipping");
+                Object.Destroy(holder);
+                if (onDone != null) onDone(null);
+                yield break;
+            }
+            yield return null;
+        }
         if (loadTask.IsFaulted || loadTask.IsCanceled || !loadTask.Result)
         {
             string why = (loadTask.Exception != null)
@@ -139,7 +198,27 @@ public static class GltfModelLoader
             yield break;
         }
 
-        yield return new WaitUntil(() => instTask.IsCompleted);
+        // Freeze fix: same bounded wait for the instantiate phase.
+        float instStart = Time.realtimeSinceStartup;
+        while (!instTask.IsCompleted)
+        {
+            if (Time.realtimeSinceStartup > BuildDeadline)
+            {
+                DeadlineReached = true;
+                Debug.LogWarning("[Gltf] Instantiate abandoned at build deadline: " + fileName + " — skipping");
+                Object.Destroy(holder);
+                if (onDone != null) onDone(null);
+                yield break;
+            }
+            if (Time.realtimeSinceStartup - instStart > kLoadTimeoutSeconds)
+            {
+                Debug.LogWarning("[Gltf] Instantiate TIMEOUT after " + kLoadTimeoutSeconds + "s: " + fileName + " — skipping");
+                Object.Destroy(holder);
+                if (onDone != null) onDone(null);
+                yield break;
+            }
+            yield return null;
+        }
         if (instTask.IsFaulted || instTask.IsCanceled || !instTask.Result)
         {
             Debug.LogWarning("[Gltf] Instantiate failed: " + fileName);
@@ -280,7 +359,10 @@ public static class GltfModelLoader
         // makes the lifetime explicit and protects against future GC/finalizer
         // changes in the package.)
         s_AliveImports.Add(gltf);
-        Debug.Log("[Gltf] Loaded: " + fileName + " as " + goName);
+        float loadSeconds = Time.realtimeSinceStartup - loadStart;
+        LoadTimings.Add(fileName + ": " + loadSeconds.ToString("F1") + "s");
+        Debug.Log("[Gltf] Loaded: " + fileName + " as " + goName + " in " + loadSeconds.ToString("F1") + "s");
+        if (OnProgress != null) OnProgress(fileName);
         if (onDone != null) onDone(holder);
     }
 

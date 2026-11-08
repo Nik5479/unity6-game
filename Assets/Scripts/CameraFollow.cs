@@ -11,13 +11,17 @@ using UnityEngine.EventSystems;
 public class CameraFollow : MonoBehaviour
 {
     public Transform target;
-    // Phase 4 (fix-push): pulled back + higher + wider pitch so the
-    // gameplay camera sees >= 3 houses from the chowk spawn. Run #19
-    // failed the screenshot test with only 2 houses in the frustum at
-    // distance 7 / height 3.4 / pitch 14 with the default 60-degree FOV.
-    public float distance = 9f;
-    public float height = 4.6f;
-    public float pitch = 18f;
+    // GTA-style third-person (fix 2026-11-08, user video v1.0.2): the
+    // old values (distance 9 / height 4.6 / pitch 18) put the camera
+    // 7.4 m above the player, 8.6 m back, looking down at 35 degrees —
+    // a bird's-eye surveillance view, not a third-person game camera.
+    // GTA V sits ~4 m behind at ~2 m up, looking down ~10-15 degrees,
+    // so the hero fills the frame and the street ahead reads. The old
+    // high values were chosen only so the screenshot test saw >= 3
+    // houses; that test's bar is now >= 1 house (see ScreenshotTest).
+    public float distance = 4.5f;
+    public float height = 2.0f;
+    public float pitch = 10f;
 
     private float yaw;
     private float shakeAmount;
@@ -35,9 +39,13 @@ public class CameraFollow : MonoBehaviour
     {
         if (target != null)
         {
-            // Fix-push P1-8: start facing south (yaw 180) so Houses 3, 4, 6
-            // are in the opening frame (was yaw 0 = facing north).
-            yaw = 180f;
+            // GTA fix 2026-11-08: start BEHIND the player (yaw 0 = camera
+            // south of the chowk, facing north the way Nilesh faces), so
+            // the opening frame is over his shoulder, not a front view.
+            // The old yaw 180 put the camera NORTH of the player facing
+            // south — in front of him, showing his face — chosen only to
+            // frame Houses 3, 4, 6 for the screenshot test.
+            yaw = 0f;
             prevTargetPos = target.position;
             hasPrevTargetPos = true;
         }
@@ -105,14 +113,25 @@ public class CameraFollow : MonoBehaviour
     /// Reset to the known-good starter camera view and stop following.
     /// Used by VillageBuilder when the camera-frustum check fails, so the
     /// player always gets a view of the village instead of an empty frame.
+    /// GTA fix 2026-11-08: the fallback is now the same over-the-shoulder
+    /// framing as the follow camera (behind the player), not the old
+    /// (0,4,10) high view — a reset must never bring back the top-down
+    /// look the user complained about.
     /// </summary>
     public void ResetToStarterView()
     {
-        // Phase 4: same wide framing as the normal follow view (see
-        // distance/height/pitch above) so a reset still shows >= 3 houses.
-        // Fix-push P1-8: south-facing like the Start yaw (was north).
-        transform.position = new Vector3(0f, 4f, 10f);
-        transform.rotation = Quaternion.Euler(22f, 180f, 0f);
+        if (target != null)
+        {
+            Vector3 offset = Quaternion.Euler(pitch, target.eulerAngles.y, 0f)
+                * new Vector3(0f, 0f, -distance);
+            transform.position = target.position + new Vector3(0f, height, 0f) + offset;
+            transform.LookAt(target.position + Vector3.up * 1.4f);
+        }
+        else
+        {
+            transform.position = new Vector3(0f, 2f, -4.5f);
+            transform.rotation = Quaternion.Euler(10f, 0f, 0f);
+        }
         enabled = false;
     }
 
