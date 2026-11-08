@@ -15,13 +15,24 @@ using UnityEngine;
 /// the caller's output list). If no path exists it returns false and the
 /// caller falls back to straight-line movement (never worse than before)
 /// and logs a warning.
+/// OVERNIGHT R3b: the grid was 1 m and the R2 CI test PROVED it too
+/// coarse — FindPath(spawn -> door) returned false. Root cause, from
+/// the R2 CI render diagnostics: the south is sealed by overlapping
+/// building footprints (School x[-23.6,-9.5], House_3 x[-13.7,-4.3],
+/// Temple x[-2.95,6.95], House_6 x[7.8,18.2]) with only a real 1.4 m
+/// gap between House_3's east edge (-4.35) and the Temple's west edge
+/// (-2.95) at z=-12. A 1 m grid + 0.45 m probe cannot pass a 1.4 m gap
+/// (both 1 m cells in it clip a wall); a 0.5 m grid can (cell centre
+/// -3.5 clears both sides). The gap is real and walkable — the PLAYER
+/// can already walk it — only the grid was too coarse.
 /// </summary>
 public static class VillagePathfinder
 {
-    private const float kCell = 1f;
-    private const int kHalf = 26; // world x/z in [-26, 26]
-    private const int kSize = 2 * kHalf + 1; // 53 cells per axis
-    private const int kCount = kSize * kSize;
+    private const float kCell = 0.5f;
+    private const float kWorldHalf = 26f; // world x/z in [-26, 26]
+    private const int kHalf = (int)(kWorldHalf / kCell); // 52 cells
+    private const int kSize = 2 * kHalf + 1; // 105 cells per axis
+    private const int kCount = kSize * kSize; // 11025
 
     // A* working arrays (static = reused across calls).
     private static readonly float[] s_g = new float[kCount];
@@ -49,10 +60,10 @@ public static class VillagePathfinder
         return mx + 0.4142f * mn; // octile distance
     }
 
-    // Nearest free cell to (ix,iz) within 3 cells (expanding square).
+    // Nearest free cell to (ix,iz) within 6 cells = 3 m (expanding square).
     private static bool NearestFree(ref int ix, ref int iz, float radius)
     {
-        for (int r = 1; r <= 3; r++)
+        for (int r = 1; r <= 6; r++)
         {
             for (int dx = -r; dx <= r; dx++)
             {
@@ -115,8 +126,9 @@ public static class VillagePathfinder
         int guard = 0;
         while (s_open.Count > 0 && guard++ < kCount * 4)
         {
-            // Linear min-scan: the grid is small (53x53) and a heap would
-            // only save microseconds here.
+            // Linear min-scan: the grid is 105x105 and a heap would only
+            // save microseconds here (A* with an octile heuristic expands
+            // a small fraction of the grid on a village-size map).
             int best = -1;
             float bestF = float.MaxValue;
             for (int i = 0; i < s_open.Count; i++)

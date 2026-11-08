@@ -14,20 +14,19 @@ using UnityEngine;
 /// fails, this test fails — but the build still proceeds (the Tests step
 /// is continue-on-error) and NileshAnimator falls back to whichever
 /// clips do exist, so a remap failure can never break the game build.
+/// OVERNIGHT R3b: the isPlaying guard had to GO. The CI runs this test
+/// in the PlayMode phase (Assets/Tests is the PlayMode assembly), where
+/// Application.isPlaying is true — so R3 SKIPPED the remap entirely and
+/// NileshCrouchWalk / NileshJump .anim were never generated. PlayMode
+/// tests execute INSIDE the Editor, so UnityEditor / AssetDatabase are
+/// available and the remap can run here; the generated .anim files
+/// persist on disk for the BUILD step of the same job.
 /// </summary>
 public class RemapAnimationsTest
 {
     [Test]
     public void RemapMixamoClipsToNilesh()
     {
-        // EditMode only: PlayMode runs in the player, where editor code
-        // does not exist. (A [Test] only runs in the EditMode phase, so
-        // this guard is belt-and-braces.)
-        if (Application.isPlaying)
-        {
-            Assert.Ignore("Remap runs in EditMode only");
-            return;
-        }
         Type remapType = null;
         foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
         {
