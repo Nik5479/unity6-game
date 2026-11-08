@@ -26,8 +26,11 @@ required. Sources kept here for the record.
 - `monster_roar.ogg` — "Aggressive beast roar" (mixkit.co/free-sound-effects/download/13/)
 - `dawn_birds.ogg` — "Little birds singing in the trees" (mixkit.co/free-sound-effects/download/17/)
 
-## NOT in this folder (pending)
+## Present in this folder
 - `whisper_1.ogg` / `whisper_2.ogg` / `whisper_3.ogg` — the 3 mimicked-voice
-  Hindi whisper lines. These must be recorded by the user on his phone
-  (whisper, pitch slightly lowered). They are NOT synthesized or faked.
-  See `Assets/Scripts/AUDIO_WIRING.md` §8.
+  Hindi whisper lines. They are the AI "Aria" voice (user-selected on the
+  afternoon of 2026-11-07 — NOT the user's own phone recording). whisper_2
+  and whisper_3 were approved by the user ("Ye sahi hai", "3 no lagado ok");
+  whisper_1 was regenerated to match the afternoon demo and its verdict
+  is still pending. (AUDIT 2026-11-08: this section previously said the
+  files were "pending" — they are on disk and wired in.)

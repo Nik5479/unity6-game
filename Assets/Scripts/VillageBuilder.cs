@@ -38,7 +38,15 @@ public static class VillageColliders
             if (dx * dx + dz * dz < radius * radius)
             {
                 // Also require vertical overlap (doors/walls are ground level).
-                if (pos.y < b.max.y && pos.y + 1.8f > b.min.y)
+                // AUDIT FIX 2026-11-08 (B1, blocking): pos.y is the player
+                // CENTRE (0.5 m above ground), so the interval must be
+                // feet-based [pos.y-0.5, pos.y+1.3] (1.8 m tall). The old
+                // centre-based [pos.y, pos.y+1.8] overstated height by
+                // 0.5 m, so the doorway lintel (min.y 2.2) blocked the
+                // player forever and the house was unenterable.
+                float feetY = pos.y - 0.5f;
+                float headY = pos.y + 1.3f;
+                if (feetY < b.max.y && headY > b.min.y)
                 {
                     return false;
                 }
@@ -2314,7 +2322,12 @@ public class VillageBuilder : MonoBehaviour
         gm.ui = ui;
 
         cycle.OnNightStart = delegate { knock.BeginNight(); AudioManager.StartNightAmbience(); };
-        cycle.OnDawn = delegate { gm.Survived(); AudioManager.StopNightAmbience(); AudioManager.PlayDawnRelief(); };
+        // AUDIT FIX 2026-11-08: dawn birds only on a real survival. The old
+        // delegate played them unconditionally, so they also played over
+        // the dawn-outside GameOver screen. (IsOver alone cannot guard
+        // this — Survived() sets it on a win too — so the check is the
+        // same inside-house condition Survived() uses.)
+        cycle.OnDawn = delegate { gm.Survived(); AudioManager.StopNightAmbience(); if (gm.player != null && GameManager.IsInsidePlayerHouse(gm.player.transform.position)) AudioManager.PlayDawnRelief(); };
     }
 
     // Follow-up 2026-11-07: the REAL monster — HellDemon Reborn (73,844

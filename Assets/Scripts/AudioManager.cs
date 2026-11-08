@@ -44,6 +44,10 @@ public class AudioManager : MonoBehaviour
     private const string kMonsterRoar = "monster_roar.ogg";   // Mixkit "Aggressive beast roar"
     private const string kDawnBirds = "dawn_birds.ogg";       // Mixkit "Little birds singing in the trees"
 
+    // AUDIT 2026-11-08: the 3 whisper lines ARE on disk and wired in
+    // (Aria AI voice, user-selected 2026-11-07 afternoon; whisper_2/3
+    // approved, whisper_1 regenerated and awaiting verdict). The old
+    // TODO below is stale and is kept only as history.
     // TODO (PENDING USER STEP — do NOT fake): the 3 mimicked-voice Hindi
     // whisper lines ("Nilesh... darwaza kholo...", etc.) must be recorded
     // by the user on his phone (whisper, pitch slightly lowered) and saved

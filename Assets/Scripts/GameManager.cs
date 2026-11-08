@@ -166,6 +166,11 @@ public class GameManager : MonoBehaviour
     {
         if (isOver) return;
         isOver = true;
+        // AUDIT FIX 2026-11-08: the sting (sting + roar + stop ambience)
+        // belongs here so ALL THREE death paths play it — door forced open,
+        // chase catch, and dawn-outside. Previously it was called only in
+        // MonsterKnock stage 4, so 2 of 3 deaths were silent.
+        AudioManager.PlayGameOverSting();
         if (player != null)
         {
             player.enabled = false;

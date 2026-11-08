@@ -182,7 +182,8 @@ public class MonsterKnock : MonoBehaviour
                 if (GameManager.Instance != null)
                 {
                     GameManager.Instance.GameOver("Darwaza khula tha... wo andar aa gaya.");
-                    AudioManager.PlayGameOverSting();
+                    // AUDIT FIX 2026-11-08: sting removed here — it now
+                    // plays inside GameManager.GameOver() for all deaths.
                 }
                 stage = 0;
                 MonsterOutside = false;
