@@ -6,7 +6,7 @@ using UnityEngine;
 /// <summary>
 /// Loads .glb AND .gltf models at runtime from Assets/StreamingAssets/Models/
 /// via glTFast (com.atteneder.gltfast 6.20.0). fileName may include a
-/// subfolder (e.g. "SoilGround/xdhhdhl_tier_2.gltf") — glTFast resolves a
+/// subfolder (e.g. "SoilGround.glb") — glTFast resolves a
 /// .gltf's .bin + textures relative to the .gltf file, so the whole bundle
 /// folder goes under Models/. Sketchfab models arrive in wildly
 /// inconsistent units (metres, centimetres, millimetres, arbitrary),
@@ -36,6 +36,72 @@ public static class GltfModelLoader
     // where the holder GameObject is destroyed anyway.
     private static readonly System.Collections.Generic.List<GltfImport> s_AliveImports
         = new System.Collections.Generic.List<GltfImport>();
+
+    // RESTART LEAK FIX (audit H5): imports from the previous scene were
+    // kept in s_AliveImports forever, so every "DOBARA KHELO" doubled the
+    // texture memory. DisposeAll() runs on scene unload (hook below):
+    // the scene's GameObjects are already gone, so destroying the meshes,
+    // materials and textures the imports own is safe.
+    // ABANDONED LOADS (audit C2): a load/instantiate abandoned at the
+    // deadline or timeout is parked here with its task and holder and
+    // disposed once its background task has finished (ReapAbandoned),
+    // instead of leaking or writing into a destroyed holder.
+    private struct Abandoned { public GltfImport import; public Task task; public GameObject holder; }
+    private static readonly System.Collections.Generic.List<Abandoned> s_Abandoned
+        = new System.Collections.Generic.List<Abandoned>();
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void HookSceneUnload()
+    {
+        UnityEngine.SceneManagement.SceneManager.sceneUnloaded -= OnSceneUnloaded;
+        UnityEngine.SceneManagement.SceneManager.sceneUnloaded += OnSceneUnloaded;
+    }
+
+    private static void OnSceneUnloaded(UnityEngine.SceneManagement.Scene scene)
+    {
+        DisposeAll();
+        Resources.UnloadUnusedAssets();
+    }
+
+    public static void DisposeAll()
+    {
+        foreach (GltfImport g in s_AliveImports)
+        {
+            try { g.Dispose(); } catch (System.Exception) { }
+        }
+        s_AliveImports.Clear();
+        ReapAbandonedNow(true);
+    }
+
+    private static void Abandon(GltfImport gltf, Task task, GameObject holder)
+    {
+        // Hide (do not destroy) the holder: an abandoned instantiate may
+        // still write into it; it is destroyed when the task completes.
+        if (holder != null) { holder.SetActive(false); holder.name += "_abandoned"; }
+        s_Abandoned.Add(new Abandoned { import = gltf, task = task, holder = holder });
+    }
+
+    // Disposes abandoned imports whose task has completed (all of them
+    // when force is true, e.g. on scene unload).
+    public static int ReapAbandonedNow(bool force)
+    {
+        for (int i = s_Abandoned.Count - 1; i >= 0; i--)
+        {
+            Abandoned a = s_Abandoned[i];
+            if (!force && a.task != null && !a.task.IsCompleted) continue;
+            try { a.import.Dispose(); } catch (System.Exception) { }
+            if (a.holder != null) Object.Destroy(a.holder);
+            s_Abandoned.RemoveAt(i);
+        }
+        return s_Abandoned.Count;
+    }
+
+    // Coroutine: keeps reaping until every abandoned load is disposed.
+    public static IEnumerator ReapAbandoned()
+    {
+        while (ReapAbandonedNow(false) > 0)
+            yield return new WaitForSecondsRealtime(1f);
+    }
 
     // FREEZE FIX 2026-11-08 — two timeouts bound every load, so the
     // village build can never hang the game again:
@@ -162,14 +228,14 @@ public static class GltfModelLoader
             {
                 DeadlineReached = true;
                 Debug.LogWarning("[Gltf] Load abandoned at build deadline: " + fileName + " — skipping");
-                Object.Destroy(holder);
+                Abandon(gltf, loadTask, holder);
                 if (onDone != null) onDone(null);
                 yield break;
             }
             if (Time.realtimeSinceStartup - loadStart > kLoadTimeoutSeconds)
             {
                 Debug.LogWarning("[Gltf] Load TIMEOUT after " + kLoadTimeoutSeconds + "s: " + fileName + " — skipping");
-                Object.Destroy(holder);
+                Abandon(gltf, loadTask, holder);
                 if (onDone != null) onDone(null);
                 yield break;
             }
@@ -206,14 +272,14 @@ public static class GltfModelLoader
             {
                 DeadlineReached = true;
                 Debug.LogWarning("[Gltf] Instantiate abandoned at build deadline: " + fileName + " — skipping");
-                Object.Destroy(holder);
+                Abandon(gltf, instTask, holder);
                 if (onDone != null) onDone(null);
                 yield break;
             }
             if (Time.realtimeSinceStartup - instStart > kLoadTimeoutSeconds)
             {
                 Debug.LogWarning("[Gltf] Instantiate TIMEOUT after " + kLoadTimeoutSeconds + "s: " + fileName + " — skipping");
-                Object.Destroy(holder);
+                Abandon(gltf, instTask, holder);
                 if (onDone != null) onDone(null);
                 yield break;
             }
