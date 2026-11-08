@@ -87,27 +87,25 @@ public class SizeCheckTest
         Vector3 savedCamPos = cam.transform.position;
         Quaternion savedCamRot = cam.transform.rotation;
 
-        // Occluders for the pose search: every big solid object, so the
-        // camera never ends up staring at a wall instead of the landmark
-        // (first run: House_5's shot was blocked by the player's hut,
-        // the cow's by House_2). Buildings block the player/camera
-        // positions too; trees only block the view ray (you can stand
-        // under a canopy, you just can't see through it).
-        System.Collections.Generic.List<Bounds> occluders = new System.Collections.Generic.List<Bounds>();
+        // Occluders for the pose search: every big BUILDING, so the camera
+        // never ends up staring at a wall instead of the landmark (first
+        // run: House_5's shot was blocked by the player's hut, the cow's
+        // by House_2). Trees are deliberately NOT occluders: a ray at
+        // 2 m height passing under a canopy still intersects the canopy's
+        // 0..13 m AABB, which wrongly rejected good sides — the haveli
+        // and banyan shots regressed to jungle foliage when trees were
+        // included. A trunk on the ray is thin enough to see past.
         System.Collections.Generic.List<Bounds> buildings = new System.Collections.Generic.List<Bounds>();
-        System.Collections.Generic.List<string> ocNames = new System.Collections.Generic.List<string>();
-        string[] occluderNames = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6",
-            "Temple", "Haveli", "School", "Clinic", "Tree_Banyan", "Tree_Mango", "Tree_Palm", "Tree_Neem1", "Gate" };
-        string[] buildingNames = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6",
+        System.Collections.Generic.List<string> buildingNames = new System.Collections.Generic.List<string>();
+        string[] buildingNameList = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6",
             "Temple", "Haveli", "School", "Clinic" };
-        foreach (string n in occluderNames)
+        foreach (string n in buildingNameList)
         {
             GameObject o = GameObject.Find(n);
             Bounds ob;
             if (o == null || !TryRenderedBounds(o, out ob)) continue;
-            occluders.Add(ob);
-            ocNames.Add(n);
-            if (System.Array.IndexOf(buildingNames, n) >= 0) buildings.Add(ob);
+            buildings.Add(ob);
+            buildingNames.Add(n);
         }
 
         foreach (Landmark lm in kLandmarks)
@@ -157,7 +155,7 @@ public class SizeCheckTest
                 Vector3 chest = pp + new Vector3(0f, 1.2f, 0f);
                 Vector3 objPoint = new Vector3(b.center.x, b.min.y + h * 0.35f, b.center.z);
                 Vector3 lt = (chest + objPoint) * 0.5f;
-                if (!PoseClear(pp, cp, lt, lm.goName, buildings, occluders, ocNames)) continue;
+                if (!PoseClear(pp, cp, lt, lm.goName, buildings, buildingNames)) continue;
                 playerPos = pp;
                 camPos = cp;
                 lookTarget = lt;
@@ -201,24 +199,23 @@ public class SizeCheckTest
 
     // Is this pose usable? The player and the camera must stand clear of
     // every building (not inside one), and the view ray from the camera
-    // to the look target must not cross any occluder (the target itself
+    // to the look target must not cross any building (the target itself
     // is excluded — the ray ends at it). Anything wrong returns false
     // and the caller tries the next side.
     private static bool PoseClear(Vector3 playerPos, Vector3 camPos, Vector3 lookTarget,
         string targetName,
         System.Collections.Generic.List<Bounds> buildings,
-        System.Collections.Generic.List<Bounds> occluders,
-        System.Collections.Generic.List<string> ocNames)
+        System.Collections.Generic.List<string> buildingNames)
     {
         foreach (Bounds b in buildings)
         {
             if (PointInAABBXZ(playerPos, b, 0.5f)) return false;
             if (PointInAABBXZ(camPos, b, 0.3f)) return false;
         }
-        for (int i = 0; i < occluders.Count; i++)
+        for (int i = 0; i < buildings.Count; i++)
         {
-            if (ocNames[i] == targetName) continue;
-            Bounds b = occluders[i];
+            if (buildingNames[i] == targetName) continue;
+            Bounds b = buildings[i];
             // Pad the box a little: a ray grazing a wall still hides
             // the target behind it.
             Bounds padded = new Bounds(b.center, b.size + new Vector3(0.4f, 0.4f, 0.4f));
