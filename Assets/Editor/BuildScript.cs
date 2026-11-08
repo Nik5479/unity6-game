@@ -39,6 +39,17 @@ public static class BuildScript
         // CI passes -devBuild for a Development build (more logging in logcat).
         bool dev = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-devBuild") >= 0;
 
+        // CI passes -addX86_64 so the APK also carries x86_64 native libs.
+        // The GitHub emulator is x86_64; running the arm64-only libunity.so
+        // through its ARM translator (ndk_translation) dies with SIGILL on an
+        // unsupported NEON instruction (FCVTZS) a few seconds after launch.
+        // Local / release builds stay arm64-only.
+        if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-addX86_64") >= 0)
+        {
+            PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64 | AndroidArchitecture.X86_64;
+            Debug.Log("[Build] Target architectures: ARM64 + X86_64 (CI emulator).");
+        }
+
         var options = new BuildPlayerOptions
         {
             scenes = new[] { "Assets/Scenes/Main.unity" },

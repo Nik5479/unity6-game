@@ -76,7 +76,9 @@ jobs:
           # androidUseCustomKeystore: 1 from ProjectSettings with no keystore
           # file / passwords -> "Can not sign the application".
           buildMethod: BuildScript.BuildAndroid
-          customParameters: ${{ inputs.development && '-devBuild' || '' }}
+          # -addX86_64: also build x86_64 libs so the APK runs natively on the
+          # x86_64 emulator in emulator-test.yml (arm64 under translation = SIGILL).
+          customParameters: -addX86_64 ${{ inputs.development && '-devBuild' || '' }}
 
       - uses: actions/upload-artifact@v4
         with:
