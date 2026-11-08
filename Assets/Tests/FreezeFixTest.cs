@@ -125,22 +125,43 @@ public class FreezeFixTest
         Assert.Greater(moved, 2f, "Player did not move with joystick input (moved " + moved + "m)");
     }
 
-    // The boot status must have cleared from "Building..." to the final
-    // "N objects built" message.
-    private static void AssertBootStatusCleared(bool expectTimedOut)
+    // Phase 1 (2026-11-08): the final "N objects built" banner now
+    // CLEARS from the screen 5 s after the build finishes (it is a debug
+    // banner — it must not sit on the game in release). The message
+    // itself is kept in VillageBuilder.LastBootStatus, so this polls up
+    // to 10 s for the on-screen text to go empty, then verifies the
+    // message via that field instead of the screen.
+    private static System.Collections.IEnumerator AssertBootStatusCleared(bool expectTimedOut)
     {
         GameObject statusGO = GameObject.Find("BootStatus");
         Assert.IsNotNull(statusGO, "BootStatus text object not found");
         Component textComp = GetComp(statusGO, "Text");
         Assert.IsNotNull(textComp, "BootStatus Text component not found");
         PropertyInfo textProp = textComp.GetType().GetProperty("text");
-        string text = (string)textProp.GetValue(textComp, null);
-        Debug.Log("[FreezeTest] Boot status: \"" + text + "\"");
-        Assert.IsFalse(text.Contains("building..."), "Boot status still stuck at Building...: \"" + text + "\"");
-        Assert.IsTrue(text.Contains("objects built"), "Boot status is not the final message: \"" + text + "\"");
+        string text = "";
+        float w = 0f;
+        while (w < 10f)
+        {
+            text = (string)textProp.GetValue(textComp, null);
+            if (string.IsNullOrEmpty(text)) break;
+            yield return new WaitForSeconds(0.5f);
+            w += 0.5f;
+        }
+        Debug.Log("[FreezeTest] Boot status after " + w + "s: \"" + text + "\"");
+        Assert.IsTrue(string.IsNullOrEmpty(text),
+            "Boot status banner did not clear after the build: \"" + text + "\"");
+        // The message itself must still be recorded in LastBootStatus.
+        System.Type builder = FindType("VillageBuilder");
+        Assert.IsNotNull(builder, "VillageBuilder type not found");
+        string last = (string)builder.GetField("LastBootStatus",
+            BindingFlags.Public | BindingFlags.Static).GetValue(null);
+        Debug.Log("[FreezeTest] LastBootStatus: \"" + last + "\"");
+        Assert.IsTrue(last.Contains("objects built"),
+            "LastBootStatus is not the final message: \"" + last + "\"");
         if (expectTimedOut)
         {
-            Assert.IsTrue(text.Contains("timed out"), "Cut-short build did not report the timeout: \"" + text + "\"");
+            Assert.IsTrue(last.Contains("timed out"),
+                "Cut-short build did not report the timeout: \"" + last + "\"");
         }
     }
 
@@ -189,7 +210,7 @@ public class FreezeFixTest
         AssertGameStarted();
         yield return AssertDayCycleAdvances();
         yield return AssertPlayerMoves();
-        AssertBootStatusCleared(expectTimedOut: false);
+        yield return AssertBootStatusCleared(expectTimedOut: false);
         LogSlowestLoads(5);
     }
 
@@ -218,6 +239,6 @@ public class FreezeFixTest
         AssertGameStarted();
         yield return AssertDayCycleAdvances();
         yield return AssertPlayerMoves();
-        AssertBootStatusCleared(expectTimedOut: true);
+        yield return AssertBootStatusCleared(expectTimedOut: true);
     }
 }

@@ -88,15 +88,31 @@ public class NileshAnimator : MonoBehaviour
         prevPos = p;
         speedSmooth = Mathf.Lerp(speedSmooth, speed, Mathf.Clamp01(dt * 8f));
 
-        // Walk speed is 5 m/s, run is 9 m/s (PlayerController).
+        // Phase 1 speeds (PlayerController): walk 1.4, jog 2.5, run 4.0.
+        // Jog uses the run clip (there is no separate jog clip).
         string want = "NileshIdle";
-        if (speedSmooth > 0.4f) want = speedSmooth > 7f ? "NileshRun" : "NileshWalk";
+        if (speedSmooth > 0.4f) want = speedSmooth > 1.9f ? "NileshRun" : "NileshWalk";
         if (want == "NileshRun" && !hasRun) want = hasWalk ? "NileshWalk" : "NileshIdle";
         if (want == "NileshWalk" && !hasWalk) want = "NileshIdle";
         if (want != current)
         {
             anim.CrossFade(want, kBlend);
             current = want;
+            if (want == "NileshIdle" && anim["NileshIdle"] != null)
+                anim["NileshIdle"].speed = 1f;
+        }
+        // Match the clip's playback speed to the ground speed so the feet
+        // don't slide: the walk cycle is authored for ~1.4 m/s and the run
+        // cycle for ~4.2 m/s. Clamped so a lag spike never fast-forwards
+        // the animation. (Idle keeps 1x — it has no ground speed.)
+        if (current == "NileshWalk" || current == "NileshRun")
+        {
+            AnimationState st = anim[current];
+            if (st != null)
+            {
+                float baseSpeed = (current == "NileshRun") ? 4.2f : 1.4f;
+                st.speed = Mathf.Clamp(speedSmooth / baseSpeed, 0.5f, 1.5f);
+            }
         }
     }
 }

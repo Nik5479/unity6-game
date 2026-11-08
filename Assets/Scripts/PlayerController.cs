@@ -12,9 +12,22 @@ using UnityEngine;
 /// </summary>
 public class PlayerController : MonoBehaviour
 {
-    public float moveSpeed = 5f;
-    public float runMultiplier = 1.8f;
+    // Phase 1 real-world speeds (2026-11-08): a human walks ~1.4 m/s,
+    // jogs ~2.5 m/s and runs ~4.0 m/s. The old 5 m/s walk / 9 m/s run
+    // made Nilesh cross the whole village in seconds and looked
+    // nothing like a person (owner's phone video).
+    public const float WalkSpeed = 1.4f;
+    public const float JogSpeed = 2.5f;
+    public const float RunSpeed = 4.0f;
+    // Acceleration / deceleration (m/s^2): reaching jog takes ~0.3 s,
+    // stopping ~0.25 s — no more instant full speed / dead stops.
+    public float accel = 8f;
+    public float decel = 10f;
     public float jumpForce = 5f;
+    // Actual smoothed ground speed (m/s), for the animator's foot-speed
+    // matching. Read-only outside this class.
+    public float CurrentSpeed { get; private set; }
+    private float speedSmooth;
 
     // Set every frame by MobileControls (virtual joystick). Overrides keyboard.
     public Vector2 moveInput;
@@ -50,8 +63,17 @@ public class PlayerController : MonoBehaviour
 
         if (move.sqrMagnitude > 0.01f)
         {
-            float speed = moveSpeed * (runHeld ? runMultiplier : 1f);
-            Vector3 step = move.normalized * speed * Time.deltaTime;
+            // Joystick magnitude sets the speed: half deflection = walk,
+            // full deflection = jog, RUN button held = run. Below half
+            // deflection the walk scales with the stick (slow creep).
+            float mag = Mathf.Clamp01(move.magnitude);
+            float target = runHeld ? RunSpeed
+                : (mag < 0.5f ? WalkSpeed * (mag / 0.5f)
+                              : Mathf.Lerp(WalkSpeed, JogSpeed, (mag - 0.5f) / 0.5f));
+            speedSmooth = Mathf.MoveTowards(speedSmooth, target,
+                (target > speedSmooth ? accel : decel) * Time.deltaTime);
+            CurrentSpeed = speedSmooth;
+            Vector3 step = move.normalized * speedSmooth * Time.deltaTime;
             Vector3 p = transform.position;
             TryMove(ref p, step);
             p.x = Mathf.Clamp(p.x, -22f, 22f);
@@ -63,6 +85,12 @@ public class PlayerController : MonoBehaviour
             float curYaw = transform.eulerAngles.y;
             float newYaw = Mathf.MoveTowardsAngle(curYaw, targetYaw, 720f * Time.deltaTime);
             transform.rotation = Quaternion.Euler(0f, newYaw, 0f);
+        }
+        else
+        {
+            // No input: decelerate to a stop (never snap to zero).
+            speedSmooth = Mathf.MoveTowards(speedSmooth, 0f, decel * Time.deltaTime);
+            CurrentSpeed = speedSmooth;
         }
 
         // Jump: Space / JUMP button.

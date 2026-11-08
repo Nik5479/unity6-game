@@ -143,7 +143,10 @@ public class VillageBuilder : MonoBehaviour
     private Vector3 meeraPos = new Vector3(0.5f, 0f, 6.5f);
     // (x 2 -> 3.6, 2026-11-07: the visual Pujari was moved 1.6 m east by
     // cheap-wins; the NPC trigger must sit on the visible priest.)
-    private Vector3 pujariPos = new Vector3(3.6f, 0f, -14.2f);
+    // Phase 1 (2026-11-08): the temple is real-size now (10 m tall, front
+    // at z=-10) — the priest moved with it to (4.5, -8.5), just outside
+    // the entrance, still east of the Nandi-shivling sightline.
+    private Vector3 pujariPos = new Vector3(4.5f, 0f, -8.5f);
     public Light lampLight;
     public Material moonMaterial;
     public GameObject lampGlow;
@@ -448,6 +451,13 @@ public class VillageBuilder : MonoBehaviour
         SetBootStatus("Village: " + CountVillageObjects() + " objects built"
             + (cutShort ? " — build timed out, started with what loaded" : "")
             + (buildErrors > 0 ? " (" + buildErrors + " step errors — see log)" : ""));
+        // Phase 1 (2026-11-08): the final "N objects built" line is a
+        // debug banner — it must not sit on screen in the game (owner's
+        // phone video). The build progress stays visible WHILE loading
+        // (useful), then the banner clears 5 s after the build finishes.
+        // The message itself is kept in LastBootStatus (and the log) so
+        // CI tests can still verify the build finished / timed out.
+        StartCoroutine(ClearBootStatusAfter(5f));
         // One-time environment reflection for the village (URP fix):
         // render the reflection probe now that every model is loaded.
         SetupReflectionProbe();
@@ -534,8 +544,19 @@ public class VillageBuilder : MonoBehaviour
         }
     }
 
+    // Last boot-status message (for CI tests: the on-screen text clears
+    // after the build, but the message must stay checkable).
+    public static string LastBootStatus = "";
+
+    private System.Collections.IEnumerator ClearBootStatusAfter(float seconds)
+    {
+        yield return new WaitForSecondsRealtime(seconds);
+        if (bootStatusText != null) bootStatusText.text = "";
+    }
+
     private void SetBootStatus(string msg)
     {
+        LastBootStatus = msg;
         if (bootStatusText != null)
         {
             bootStatusText.text = msg;
@@ -1384,10 +1405,11 @@ public class VillageBuilder : MonoBehaviour
             Debug.LogWarning("[Village] Player missing — real Nilesh model skipped");
             yield break;
         }
+        // Phase 1 real-size table (2026-11-08): Nilesh is 1.75 m tall.
         GameObject nilesh = null;
         yield return GltfModelLoader.LoadModel(
             "indian_man_77_hwkm.glb", player.transform, "Nilesh",
-            player.transform.position, 0f, 1.7f,
+            player.transform.position, 0f, 1.75f,
             GltfModelLoader.NormalizeMode.ByHeight,
             GltfModelLoader.ColliderMode.None, g => nilesh = g);
         if (nilesh == null)
@@ -1439,11 +1461,15 @@ public class VillageBuilder : MonoBehaviour
     private System.Collections.IEnumerator BuildHousesAsync()
     {
         // Player's house: real thatched hut shell + primitive door/interior.
+        // Phase 1 real-size table: a kachcha hut is 3-4 m tall. ByHeight
+        // 4.0 (top of the range — the interior must still fit the 2.1 m
+        // hospital bed). The old ByWidth 6.5 made the hut 5.8 m tall, so
+        // Nilesh (1.75 m) looked like a child next to his own house.
         Vector3 playerCenter = new Vector3(-9f, 0f, 6f);
         GameObject hut = null;
         yield return GltfModelLoader.LoadModel(
             "thatched_hut_4_p31g.glb", villageRoot, "House_Player",
-            playerCenter, 0f, 6.5f, GltfModelLoader.NormalizeMode.ByWidth,
+            playerCenter, 0f, 4.0f, GltfModelLoader.NormalizeMode.ByHeight,
             GltfModelLoader.ColliderMode.None, g => hut = g);
         if (hut != null)
         {
@@ -1451,9 +1477,9 @@ public class VillageBuilder : MonoBehaviour
             float w = hb.size.x;
             float d = hb.size.z;
             float doorX = hb.max.x - playerCenter.x;
-            BuildDoor(hut.transform, playerCenter, doorX, DoorSide.East, 1.2f, 2.2f);
+            BuildDoor(hut.transform, playerCenter, doorX, DoorSide.East, 1.2f, 2.1f);
             BuildHouseInterior(hut.transform, playerCenter, w, d);
-            RegisterHouseDoorGap(hb, DoorSide.East, 1.2f, 2.2f);
+            RegisterHouseDoorGap(hb, DoorSide.East, 1.2f, 2.1f);
         }
         else
         {
@@ -1461,6 +1487,11 @@ public class VillageBuilder : MonoBehaviour
         }
 
         // Houses 2-6: one different real model each.
+        // Phase 1 real-size table: houses are scaled by HEIGHT now, not
+        // width. The old ByWidth sizes made squat models far too short —
+        // House_5 was 2.6 m tall and House_6 3.05 m, so the 1.75 m hero
+        // looked as tall as his neighbours' houses. Pakka houses 5.5 m,
+        // kachcha huts 3.5 m.
         // Follow-up 2026-11-07: Indian House Old (35,565 tris, albedo-only)
         // replaces the 4,100-tri low-poly box.
         yield return BuildRealHouse("House_2", "indian_house_old_18_qlsq.glb",
@@ -1470,16 +1501,16 @@ public class VillageBuilder : MonoBehaviour
         // old pointed hut until the round-2 hut arrives — every house
         // must be different.
         yield return BuildRealHouse("House_3", "thatched_hut_stealth86_50k.glb",
-            new Vector3(-9f, 0f, -9f), -10f, 4.5f);
+            new Vector3(-9f, 0f, -9f), -10f, 3.5f);
         // Follow-up 2026-11-07: traditional ROUND thatched hut, decimated
         // 149k -> 50k tris (full PBR). Round silhouette, genuinely different
         // from House_3's gabled stealth86 hut.
         yield return BuildRealHouse("House_4", "traditional_round_thatched_hut_50k.glb",
-            new Vector3(9f, 0f, -7f), 25f, 5f);
+            new Vector3(9f, 0f, -7f), 25f, 3.5f);
         yield return BuildRealHouse("House_5", "old_village_house_-_indian_game_asset_24_bac7.glb",
-            new Vector3(-13f, 0f, 13f), -20f, 5f);
+            new Vector3(-13f, 0f, 13f), -20f, 5.5f);
         yield return BuildRealHouse("House_6", "indian_village_house_famous_3d_model_37_4zjm.glb",
-            new Vector3(13f, 0f, -14f), 10f, 5f);
+            new Vector3(13f, 0f, -14f), 10f, 5.5f);
     }
 
     private System.Collections.IEnumerator BuildRealHouse(
@@ -1488,7 +1519,7 @@ public class VillageBuilder : MonoBehaviour
         GameObject h = null;
         yield return GltfModelLoader.LoadModel(
             file, villageRoot, name, pos, yaw, size,
-            GltfModelLoader.NormalizeMode.ByWidth,
+            GltfModelLoader.NormalizeMode.ByHeight,
             GltfModelLoader.ColliderMode.FullBounds, g => h = g);
         if (h == null)
         {
@@ -1557,7 +1588,7 @@ public class VillageBuilder : MonoBehaviour
 
         float t = 0.3f;          // wall thickness
         float doorW = 1.2f;
-        float doorH = 2.2f;
+        float doorH = 2.1f;      // Phase 1 real-size table: a door is 2.1 m tall.
 
         // Floor slab (stone plinth).
         Box(name + "_Floor", center + new Vector3(0f, 0.06f, 0f), new Vector3(w + 0.4f, 0.12f, d + 0.4f), matStone, root);
@@ -1698,9 +1729,11 @@ public class VillageBuilder : MonoBehaviour
             GltfModelLoader.ColliderMode.FullBounds, g => well = g);
         if (well == null)
         {
-            // Primitive fallback (Phase 2 well).
-            Cylinder("Well", wellPos + new Vector3(0f, 0.5f, 0f), new Vector3(2.0f, 1.0f, 2.0f), matStone, villageRoot);
-            Cylinder("WellWater", wellPos + new Vector3(0f, 0.92f, 0f), new Vector3(1.7f, 0.06f, 1.7f), MakeFlat("WellWater", new Color(0.02f, 0.06f, 0.09f), 0.9f), villageRoot);
+            // Primitive fallback (Phase 2 well). Phase 1 real-size table:
+            // the well WALL is 0.8 m tall (posts + roof above it are the
+            // rest of the structure).
+            Cylinder("Well", wellPos + new Vector3(0f, 0.4f, 0f), new Vector3(2.0f, 0.8f, 2.0f), matStone, villageRoot);
+            Cylinder("WellWater", wellPos + new Vector3(0f, 0.72f, 0f), new Vector3(1.7f, 0.06f, 1.7f), MakeFlat("WellWater", new Color(0.02f, 0.06f, 0.09f), 0.9f), villageRoot);
             Cylinder("WellPostA", wellPos + new Vector3(-0.9f, 1.6f, 0f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
             Cylinder("WellPostB", wellPos + new Vector3(0.9f, 1.6f, 0f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
             GameObject wellRoof = Box("WellRoof", wellPos + new Vector3(0f, 2.8f, 0f), new Vector3(2.6f, 0.12f, 1.8f), matRoof, villageRoot);
@@ -1710,7 +1743,7 @@ public class VillageBuilder : MonoBehaviour
             beamA.transform.rotation = Quaternion.Euler(0f, 0f, 10f);
             GameObject beamB = Box("WellBeamB", wellPos + new Vector3(0f, 2.62f, 0f), new Vector3(0.12f, 0.12f, 1.7f), matWood, villageRoot);
             beamB.transform.rotation = Quaternion.Euler(10f, 0f, 0f);
-            Block(wellPos + new Vector3(0f, 0.5f, 0f), new Vector3(2.2f, 1.1f, 2.2f));
+            Block(wellPos + new Vector3(0f, 0.4f, 0f), new Vector3(2.2f, 0.9f, 2.2f));
         }
 
         // Food pickup (crate) next to the well.
@@ -1792,17 +1825,20 @@ public class VillageBuilder : MonoBehaviour
         // Inner trees: REAL models first — they are also the clone sources
         // for the jungle-edge ring (clones share meshes/materials, so the
         // ring costs no extra texture memory).
+        // Phase 1 real-size table: mango 9 m, banyan 13 m, palm 10 m.
+        // The old heights (6/7/5 m) made the jungle read as shrubs next
+        // to the 10 m temple.
         GameObject mango = null, banyan = null, palm = null;
         yield return LoadRealTree("mango_tree_3_sl11.glb", "Tree_Mango",
-            new Vector3(-16f, 0f, -2f), 6f, GltfModelLoader.ColliderMode.Trunk, g => mango = g);
+            new Vector3(-16f, 0f, -2f), 9f, GltfModelLoader.ColliderMode.Trunk, g => mango = g);
         // Replacement 2026-11-07: Chinese Banyan, 111k tris with real
         // aerial roots (the old 3.2k-tri banyan + its 35 m base disc are gone).
         yield return LoadRealTree("chinese_banyan_ficus_microcarpa_9_tpa1.glb", "Tree_Banyan",
-            new Vector3(16f, 0f, 2f), 7f, GltfModelLoader.ColliderMode.Trunk, g => banyan = g);
+            new Vector3(16f, 0f, 2f), 13f, GltfModelLoader.ColliderMode.Trunk, g => banyan = g);
         // Replacement 2026-11-07: Realistic Palm Tree Free, 27k tris,
         // single date palm (the old 2.9k-tri cluster rendered black).
         yield return LoadRealTree("realistic_palm_tree_free_8_k8rm.glb", "Tree_Palm",
-            new Vector3(-4f, 0f, 18f), 5f, GltfModelLoader.ColliderMode.FullBounds, g => palm = g);
+            new Vector3(-4f, 0f, 18f), 10f, GltfModelLoader.ColliderMode.FullBounds, g => palm = g);
         yield return LoadRealTree("trees_25_wae0.glb", "Tree_Pack",
             new Vector3(-18f, 0f, -18f), 8f, GltfModelLoader.ColliderMode.FullBounds, null);
 
@@ -1817,11 +1853,11 @@ public class VillageBuilder : MonoBehaviour
         // variant fails to load, the near tree is used as before.
         GameObject mangoFar = null, banyanFar = null, palmFar = null;
         Vector3 hidden = new Vector3(0f, 0f, -80f);
-        yield return GltfModelLoader.LoadModel("mango_tree_far.glb", villageRoot, "Tree_MangoFar", hidden, 0f, 6f,
+        yield return GltfModelLoader.LoadModel("mango_tree_far.glb", villageRoot, "Tree_MangoFar", hidden, 0f, 9f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => mangoFar = g);
-        yield return GltfModelLoader.LoadModel("banyan_far.glb", villageRoot, "Tree_BanyanFar", hidden, 0f, 7f,
+        yield return GltfModelLoader.LoadModel("banyan_far.glb", villageRoot, "Tree_BanyanFar", hidden, 0f, 13f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => banyanFar = g);
-        yield return GltfModelLoader.LoadModel("palm_far.glb", villageRoot, "Tree_PalmFar", hidden, 0f, 5f,
+        yield return GltfModelLoader.LoadModel("palm_far.glb", villageRoot, "Tree_PalmFar", hidden, 0f, 10f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => palmFar = g);
         GameObject[] ringSources = new GameObject[] {
             mangoFar != null ? mangoFar : mango,
@@ -1935,9 +1971,12 @@ public class VillageBuilder : MonoBehaviour
     private System.Collections.IEnumerator BuildPropsAsync()
     {
         // Vehicles / big props.
+        // Phase 1 real-size table: carts, car and tractor are scaled by
+        // HEIGHT now (a car is 1.5 m tall, not 3 m long — the old ByWidth
+        // sizes made the Ambassador 1.4 m tall and the tractor 2.8 m).
         yield return LoadProp("medieval_wooden_cart_1_jab4.glb", "Cart",
-            new Vector3(5.5f, 0f, 3.0f), 0f, 2.2f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(5.5f, 0f, 3.0f), 0f, 1.5f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Replacement 2026-11-07: Bullcart, 105k tris — good geometry but
         // ZERO textures as distributed (confirmed twice). Wood PBR is
         // applied in code (ApplyWoodPbr) — never used flat-coloured.
@@ -1945,15 +1984,15 @@ public class VillageBuilder : MonoBehaviour
         // west fence line (x=-5.5, z -13.4 to -1), the rail passing
         // through it. Now (-7.5, -4): 0.75 m clear of the fence.
         yield return LoadProp("Bullcart.glb", "BullockCart",
-            new Vector3(-7.5f, 0f, -4f), 0f, 2.5f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
+            new Vector3(-7.5f, 0f, -4f), 0f, 1.6f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
             ApplyWoodPbr);
         // Replacement 2026-11-07: Classic Tractor, 81.7k tris — good
         // geometry but ZERO textures as distributed. PBR is applied per
         // material name in code (ApplyTractorPbr) — never flat-coloured.
         yield return LoadProp("classic_tractor__1__11_scro.glb", "Tractor",
-            new Vector3(12f, 0f, 11f), 30f, 3f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
+            new Vector3(12f, 0f, 11f), 30f, 2.5f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
             ApplyTractorPbr);
         // Fix-push P2-14: hero's broken-down car (rusty old car, once only,
         // at the north village edge by the gate — agreed story override of
@@ -1967,14 +2006,14 @@ public class VillageBuilder : MonoBehaviour
         // through it. Now (1, 16): in the south lane by the gate, clear
         // of the fence (east edge 3.4 < 5.5) and of the gate (z <= 18.6).
         yield return LoadProp("hindustan_ambassador_4_rh04.glb", "HeroCar",
-            new Vector3(1f, 0f, 16f), 30f, 3f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
+            new Vector3(1f, 0f, 16f), 30f, 1.5f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
             WeatherAmbassador);
         // Ancient gate at the north lane entrance — no collider, so the
         // player can walk through the arch.
         yield return LoadProp("ancient_gate_11_4q5m.glb", "Gate",
-            new Vector3(0f, 0f, 20.5f), 0f, 4f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+            new Vector3(0f, 0f, 20.5f), 0f, 4.5f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // Small props near the houses.
         // Placement fix 2026-11-07: the handpump sat at (5, 9), 0.25 m
         // from the east fence rail. Now (4.5, 9): clear of the fence.
@@ -1985,40 +2024,45 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(-5f, 0f, 8.5f), 0f, 0.5f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         yield return LoadProp("rusty_and_oil_stained_oil_barrel_43_s99h.glb", "OilBarrel",
-            new Vector3(7.5f, 0f, 3.5f), 0f, 0.7f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(7.5f, 0f, 3.5f), 0f, 0.9f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Hospital bed INSIDE Nilesh's house (replaces the primitive bed).
         yield return LoadProp("old_and_worn_out_hospital_bed_42_kn6o.glb", "HospitalBed",
             playerBedPos, 90f, 2.1f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         // Animals: cow, goat and buffalo in the field; horse by the cart;
         // the dog by Nilesh's house.
+        // Phase 1 real-size table: cow/buffalo 1.45 m at the shoulder,
+        // goat 0.7 m, horse 1.6 m, wolf 0.75 m — all by HEIGHT now. The
+        // old ByWidth sizes made the horse 2.35 m tall and the wolf
+        // 1.0 m at the shoulder (a pony-sized dog).
         yield return LoadProp("cow_15_u1bj.glb", "Cow",
-            new Vector3(8f, 0f, 14f), 0f, 1.8f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(8f, 0f, 14f), 0f, 1.45f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Replacement 2026-11-07: Boer Goat, 10.4k tris, FULL PBR
         // (the old 1.5k-tri toy goat is gone).
         // Placement fix 2026-11-07: the goat stood at (12, 13) — INSIDE
         // the tractor's footprint (tractor at (12, 11) spans z 8.5-13.5).
         // Now (13, 15): inside the crop field, clear of the tractor.
         yield return LoadProp("boer_goat__3d_model_free_7_dr1w.glb", "Goat",
-            new Vector3(13f, 0f, 15f), 0f, 1f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(13f, 0f, 15f), 0f, 0.7f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         yield return LoadProp("water_buffalo_18_44fy.glb", "Buffalo",
-            new Vector3(6f, 0f, 17f), 0f, 2f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(6f, 0f, 17f), 0f, 1.45f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Replacement 2026-11-07: Horse, 70.5k tris, albedo+normal
         // (the old 2.9k-tri horse rendered black).
         yield return LoadProp("horse_6_jrh4.glb", "Horse",
-            new Vector3(5f, 0f, 6f), 0f, 2.4f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(5f, 0f, 6f), 0f, 1.6f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Wolf swap 2026-11-08: Dire Wolf Lite (Literock Studios, itch.io),
         // 9,991 tris, FULL PBR, rigged, 4 anims — replaces the old Shiba
         // (4,316 tris, 0 PBR; backed up to fix-backups/wolf-swap-20261108/).
-        // Raw length 2.53 m; ByWidth 1.8 m => scale ~0.71, shoulder ~1.0 m.
+        // Phase 1 real-size table: a dog/wolf is 0.6-0.8 m at the shoulder.
+        // The old ByWidth 1.8 made it 1.0 m at the shoulder — a calf-sized dog.
         yield return LoadProp("Dire_Wolf_Lite.glb", "Wolf",
-            new Vector3(-6f, 0f, 8f), 0f, 1.8f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
+            new Vector3(-6f, 0f, 8f), 0f, 0.75f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
             g => GltfModelLoader.PlayEmbeddedAnimation(g, "idle_loop"));
     }
 
@@ -2244,40 +2288,51 @@ public class VillageBuilder : MonoBehaviour
         // temple spot (2, -17) — REPLACES the primitive shell (removed
         // above). NOTE: model yaw is unverified — check the CI screenshot
         // that the entrance faces north (chowk).
+        // Phase 1 real-size table: a temple with shikhar is 10-14 m tall.
+        // The old ByWidth 7 made it 5.1 m tall — barely 3x the hero, so
+        // Nilesh looked as big as the temple. ByHeight 10 (low end of
+        // the range — the model is wider than tall, so 10 m already
+        // spans 13.7 m wide).
         yield return LoadProp("hindu_temple_88_62er.glb", "Temple",
-            new Vector3(2f, 0f, -17f), 0f, 7f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(2f, 0f, -17f), 0f, 10f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // School landmark (south-west, clear of House_3 and the jungle ring).
+        // Phase 1: a pakka school is 5 m tall (the old ByWidth 7 made it
+        // 2.6 m — shorter than two Nileshes stacked).
         yield return LoadProp("school-building_74_yizq.glb", "School",
-            new Vector3(-16.5f, 0f, -14f), 25f, 7f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(-16.5f, 0f, -14f), 25f, 5f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // HAVELI (Meshy, free tier) — the big missing landmark, east of
         // the chowk facing it. Set back from the jungle ring so it only
         // brushes one ring tree. Fix-push P2-17: moved 1 m west (17 -> 16).
+        // Phase 1: a 2-storey haveli is 8 m tall (was ByWidth 8 -> 9.1 m).
         yield return LoadProp("meshy_haveli_86_hvl.glb", "Haveli",
             new Vector3(16f, 0f, -3.5f), -90f, 8f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Shivling (cheap-wins 2026-11-07): the OLD 58 MB file was
         // defective (5 of 15 embedded textures zeroed) and is gone for
         // good — this is the NEW clean Mahadev (5.9 MB, 213k tris,
         // 1 texture, verified valid glTF v2), a seated Shiva murti.
-        // Placed ON the shrine platform just inside the front (z=-16,
-        // not -17): the shrine's solid interior block spans z -17.8 to
-        // -16.2, so at -17 the murti sat embedded inside solid stone.
+        // Placed ON the shrine platform just inside the front: the
+        // shrine's solid interior block scales with the temple, so at
+        // the new 10 m temple the murti sits at z=-15 (was -16), still
+        // just south of the block's south face.
         yield return LoadProp("mahadev_001__1__2_t4b6.glb", "Shivling",
-            new Vector3(2f, 0f, -16f), 0f, 1.0f,
+            new Vector3(2f, 0f, -15f), 0f, 1.0f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // NANDI (cheap-wins 2026-11-07): user-sent granite Nandi,
         // decimated 441k -> 150k tris. Placed in the temple courtyard
-        // NORTH of the gateway (z=-12.8), facing the temple (yaw 180):
-        // the temple's own gateway at z=-13.82 carries a giant hanging
-        // bell on the axis that hid the Nandi when it stood between the
-        // gateway and the shrine. Pujari stands to the side so the
-        // Nandi-shivling sightline stays clear.
+        // NORTH of the gateway, facing the temple (yaw 180). Phase 1:
+        // the temple front moved south to z=-10 when the temple grew
+        // to 10 m, so the Nandi moved with it to (2, -8.8) — still in
+        // the courtyard, facing the shrine, clear of the entrance.
         yield return LoadProp("granite_figure_of_a_nandi_bull_3_3z0y.glb", "Nandi",
-            new Vector3(2f, 0f, -12.8f), 180f, 1.2f,
+            new Vector3(2f, 0f, -8.8f), 180f, 1.2f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // Pujari at the temple entrance, facing the chowk.
+        // Phase 1: moved with the temple front to (4.5, -8.5) — just
+        // outside the entrance, still east of the Nandi-shivling
+        // sightline (x=2), and clear of the temple's own footprint.
         // Lighting pass 2026-11-07: yaw 0 -> 180. The close-up proved he
         // faced NORTH (toward the temple) at yaw 0 — the camera south of
         // him saw his back. Yaw 180 turns him to face the chowk (+z).
@@ -2297,7 +2352,7 @@ public class VillageBuilder : MonoBehaviour
         // he was hiding the Nandi behind him (same x, 1 m apart).
         // (Position NOT changed by this replacement — x stays 3.6.)
         yield return LoadProp("indian_man_in_dhoti__1__2_kfur.glb", "Pujari",
-            new Vector3(3.6f, 0f, -14.2f), 270f, 1.7f,
+            new Vector3(4.5f, 0f, -8.5f), 270f, 1.75f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // Fix pass 2026-11-08: yaw 180 faced EAST (south close-up
         // showed his face in profile pointing right) and yaw 90 faced
@@ -2310,7 +2365,7 @@ public class VillageBuilder : MonoBehaviour
         GltfModelLoader.PlayEmbeddedAnimations(GameObject.Find("Pujari"));
         // Second villager (rigged indian_man, sunglasses variant) near the handpump.
         yield return LoadProp("indian_man__sunglasses_76_gmed.glb", "Villager_Man",
-            new Vector3(6.5f, 0f, 10.5f), -60f, 1.7f,
+            new Vector3(6.5f, 0f, 10.5f), -60f, 1.75f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         GltfModelLoader.PlayEmbeddedAnimations(GameObject.Find("Villager_Man"));
         // MEERA — second main character (rigged indian_woman_in_saree,
@@ -2318,20 +2373,21 @@ public class VillageBuilder : MonoBehaviour
         // step, never a blocker). Stands on the chowk lane by Nilesh's
         // house, facing the player spawn / camera.
         yield return LoadProp("indian_woman_in_saree_84_8ssr.glb", "Meera",
-            new Vector3(0.5f, 0f, 6.5f), 180f, 1.65f,
+            new Vector3(0.5f, 0f, 6.5f), 180f, 1.70f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         GltfModelLoader.PlayEmbeddedAnimations(GameObject.Find("Meera"));
         // MUKHIYA (Meshy, free tier) — the old village headman, standing
         // by the chowk near the well.
         yield return LoadProp("meshy_mukhiya_87_mky.glb", "Mukhiya",
-            new Vector3(-3.5f, 0f, 2.5f), 45f, 1.7f,
+            new Vector3(-3.5f, 0f, 2.5f), 45f, 1.75f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // Chickens (user-made on Meshy) — placed ONCE (fix-push P0-4b:
         // was 3 copies of the same 2.4M-tri file; the file itself is
         // replaced with a decimated version by another worker).
+        // Phase 1: a chicken is 0.45 m tall (was ByWidth 0.6 -> ~0.67 m).
         yield return LoadProp("chicken_73_eoja.glb", "Chicken_1",
-            new Vector3(-6.5f, 0f, 8f), 40f, 0.6f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+            new Vector3(-6.5f, 0f, 8f), 40f, 0.45f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         // yield return LoadProp("chicken_73_eoja.glb", "Chicken_2",
         //     new Vector3(7f, 0f, 5.5f), -120f, 0.6f,
         //     GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
@@ -2360,15 +2416,17 @@ public class VillageBuilder : MonoBehaviour
         // Shamshan (south-east corner): grave stone set + small grave.
         // Fix-push P2-17: moved 2 m east (17 -> 19 / 14.5 -> 16.5) so the
         // graves no longer overlap House_6's corner (~0.25 m before).
+        // Phase 1: House_6 grew to 5.5 m tall (9 m wide), so the whole
+        // cluster shifts ~0.5-1 m south-east again to stay clear of it.
         yield return LoadProp("grave_stone_collection_64_7j05.glb", "GraveStones",
-            new Vector3(19f, 0f, -18f), 0f, 3.5f,
+            new Vector3(19.5f, 0f, -18.5f), 0f, 3.5f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         // Fix-push P2-14: shamshan pyre (woodpile) + fire, by the graves.
         yield return LoadProp("woodpile_game_ready_asset_91_qdgo.glb", "PyreWood",
-            new Vector3(18.5f, 0f, -19.5f), 20f, 1.8f,
+            new Vector3(19f, 0f, -20f), 20f, 1.8f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         yield return LoadProp("small_fire_place_90_23ou.glb", "ShamshanFire",
-            new Vector3(16.8f, 0f, -19.5f), 0f, 1.5f,
+            new Vector3(17.2f, 0f, -20.5f), 0f, 1.5f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         // Phase B: BHUMIJA SHIKARA (replacement 2026-11-07) — a real
         // 12th-century Hoysala shrine scan (150k tris, albedo-only) as the
@@ -2377,24 +2435,30 @@ public class VillageBuilder : MonoBehaviour
         // nobody goes to. (User's FINAL choice after two flips; Old Ruined
         // Temple stays on disk as backup only — do NOT place it.)
         yield return LoadProp("Bhumija.glb", "AngkorTemple",
-            new Vector3(21f, 0f, 12f), -90f, 8f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(21f, 0f, 12f), -90f, 9f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Follow-up 2026-11-07: Abandoned hospital building (54,041 tris,
         // 21 meshes, 11 materials, ALL full PBR) replaces the decimated
         // kralls clinic (149,968 tris, 724 meshes / 60 materials) — same
         // spot at the west village edge facing the chowk. 21 vs 724 meshes
         // is a huge draw-call win.
+        // Phase 1: the old ByWidth 6 made the 3-storey hospital 2.6 m
+        // tall. ByHeight 6 (a long low block — the model is 3.5x wider
+        // than tall) and moved 4.5 m east to (-13.5, -2) so its 14 m
+        // length still fits inside the jungle ring.
         yield return LoadProp("abandoned_hospital_building_20_2516.glb", "Clinic",
-            new Vector3(-18f, 0f, -2f), 90f, 6f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            new Vector3(-13.5f, 0f, -2f), 90f, 6f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Wooden dock/pier at the north village edge (no river mesh yet —
         // it reads as the pier at the water's edge; river comes later).
         yield return LoadProp("dock_pier_78_n66e.glb", "Dock",
             new Vector3(-7f, 0f, 19f), 0f, 6f,
             GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
         // Lanterns: brass diya inside Nilesh's house, chowk lantern by the lamp.
+        // Phase 1: the player's hut shrank to 4 m tall (z span 4.93-7.07),
+        // so the house diya moved from z=4.5 to z=5.5 to stay inside it.
         yield return LoadProp("brass_diya_lantern.glb", "DiyaLantern",
-            new Vector3(-10.5f, 0f, 4.5f), 0f, 0.45f,
+            new Vector3(-10.5f, 0f, 5.5f), 0f, 0.45f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
         yield return LoadProp("Lantern_01.glb", "ChowkLantern",
             new Vector3(3.2f, 0f, 2.2f), 0f, 0.9f,
@@ -2405,8 +2469,12 @@ public class VillageBuilder : MonoBehaviour
         // is removed — the tree itself is the best in the project, the
         // count was the cost). South of the chowk. Trunk-only collider
         // like the other real trees, so the canopy never walls off an area.
+        // Phase 1: the temple grew to 10 m tall and its front now sits
+        // at z=-10, so the tree moved from (4, -10) to (8, -4) — still
+        // north of the chowk, clear of the temple's front face, and 8 m
+        // tall like a real neem.
         yield return LoadProp("realistic_hd_chinaberry_tree_1330_83_1wiy.glb", "Tree_Neem1",
-            new Vector3(4f, 0f, -10f), 0f, 6f,
+            new Vector3(8f, 0f, -4f), 0f, 8f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.Trunk);
         // FBX props (native Unity import, under Assets/Resources/):
         // fallen pine at the north-west jungle edge, small grave in the shamshan.
@@ -2421,8 +2489,10 @@ public class VillageBuilder : MonoBehaviour
             // SmallGrave FBX is a FLAT slab (raw 1.1 wide x 0.23 thick x 2.2
             // long) — normalise by WIDTH to a real 2.2 m grave length.
             // ByHeight (old: 1.2 m tall) scaled it to a 13 m wide slab.
+            // Phase 1: moved with the rest of the shamshan cluster to
+            // (17.5, -20.5), clear of the grown House_6.
             GameObject grave = InstantiateResourceModel("SmallGrave/SmallGrave", "SmallGrave",
-                new Vector3(16.5f, 0f, -18f), -30f, 2.2f, false);
+                new Vector3(17.5f, 0f, -20.5f), -30f, 2.2f, false);
             if (grave == null) Debug.LogWarning("[Village] Small grave FBX not placed");
         });
     }

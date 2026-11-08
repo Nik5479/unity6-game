@@ -10,7 +10,8 @@ using UnityEngine.TestTools;
 /// FULL GAME AUDIT — logic checks (no camera rendering, log-only so it
 /// cannot OOM). Verifies the audit's highest-risk static claims at runtime:
 ///  B1: can the player walk through the player-house doorway (lintel)?
-///  Walk speed: measured m/s vs the 5 m/s constant (reported ~6.2 m/s).
+///  Walk speed: measured m/s vs the 2.5 m/s jog constant (full joystick
+///  deflection = jog; Phase 1, 2026-11-08 — was 5 m/s).
 ///  Overlaps O1/O2/O8: wolf vs chicken, ring tree vs gate, shamshan cluster.
 ///  Moon: material shader + _Fog property (dark-disc root cause).
 /// Uses reflection only (test assembly cannot reference game classes).
@@ -151,7 +152,7 @@ public class AuditLogicTest
         moveInputField.SetValue(pc, Vector2.zero);
         Vector3 wEnd = player.transform.position;
         float dist = Vector3.Distance(new Vector3(wStart.x, 0, wStart.z), new Vector3(wEnd.x, 0, wEnd.z));
-        Debug.Log("[Audit] Walk speed: " + dist + " m in " + wt + " s = " + (dist / wt) + " m/s (constant is 5 m/s)");
+        Debug.Log("[Audit] Walk speed: " + dist + " m in " + wt + " s = " + (dist / wt) + " m/s (jog constant is 2.5 m/s)");
 
         // ---- Overlaps via renderer bounds ----
         CheckOverlap("Wolf", "Chicken_1", "O1 wolf/chicken");

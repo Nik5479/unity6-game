@@ -20,6 +20,7 @@ public class MobileControls : MonoBehaviour
 
     private VirtualJoystick joystick;
     private Text subtitleText;
+    private CanvasGroup subtitleGroup;
     private Text objectiveText;
     private Text centerText;
     private Button restartButton;
@@ -126,17 +127,29 @@ public class MobileControls : MonoBehaviour
         {
             player.moveInput = joystick.Value;
         }
-        if (subtitleText != null && Time.time > subtitleUntil)
+        if (subtitleText != null)
         {
-            if (subtitleQueued != null && Time.time < subtitleQueuedUntil)
+            if (Time.time > subtitleUntil)
             {
-                subtitleText.text = subtitleQueued;
-                subtitleUntil = subtitleQueuedUntil;
-                subtitleQueued = null;
+                if (subtitleQueued != null && Time.time < subtitleQueuedUntil)
+                {
+                    subtitleText.text = subtitleQueued;
+                    subtitleUntil = subtitleQueuedUntil;
+                    subtitleQueued = null;
+                    if (subtitleGroup != null) subtitleGroup.alpha = 1f;
+                }
+                else
+                {
+                    subtitleText.text = "";
+                    if (subtitleGroup != null) subtitleGroup.alpha = 0f;
+                }
             }
-            else
+            else if (subtitleGroup != null)
             {
-                subtitleText.text = "";
+                // Phase 1 (2026-11-08): fade the subtitle out over its
+                // last 0.8 s instead of snapping it off — and it always
+                // fades, never lingers on screen after the line ends.
+                subtitleGroup.alpha = Mathf.Clamp01((subtitleUntil - Time.time) / 0.8f);
             }
         }
         // E = interact on keyboard.
@@ -163,6 +176,7 @@ public class MobileControls : MonoBehaviour
         }
         subtitleText.text = text;
         subtitleUntil = Time.time + duration;
+        if (subtitleGroup != null) subtitleGroup.alpha = 1f;
     }
 
     public void SetObjective(string text)
@@ -260,9 +274,11 @@ public class MobileControls : MonoBehaviour
         esGO.AddComponent<EventSystem>();
         esGO.AddComponent<StandaloneInputModule>();
 
-        // Objective (top-left).
+        // Objective (top-left). Phase 1 (2026-11-08): the old 900x44 box
+        // at font 24 clipped long hints to one line on 20:9 phones —
+        // 820x64 at font 22 gives the hint room for a second line.
         objectiveText = MakeText(hudRoot, "Objective", new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(16f, -16f), new Vector2(900f, 44f), 24, TextAnchor.UpperLeft,
+            new Vector2(16f, -16f), new Vector2(820f, 64f), 22, TextAnchor.UpperLeft,
             "Bhairavpur — Nilesh");
         Shadow objSh = objectiveText.gameObject.AddComponent<Shadow>();
         objSh.effectColor = new Color(0f, 0f, 0f, 0.9f);
@@ -276,6 +292,9 @@ public class MobileControls : MonoBehaviour
         Shadow sh = subtitleText.gameObject.AddComponent<Shadow>();
         sh.effectColor = new Color(0f, 0f, 0f, 0.9f);
         sh.effectDistance = new Vector2(2f, -2f);
+        // Phase 1: CanvasGroup drives the fade-out (see Update).
+        subtitleGroup = subtitleText.gameObject.AddComponent<CanvasGroup>();
+        subtitleGroup.alpha = 0f;
 
         // Centre announcement (hidden).
         centerText = MakeText(hudRoot, "CenterText", new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),

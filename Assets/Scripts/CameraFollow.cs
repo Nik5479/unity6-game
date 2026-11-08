@@ -19,9 +19,14 @@ public class CameraFollow : MonoBehaviour
     // so the hero fills the frame and the street ahead reads. The old
     // high values were chosen only so the screenshot test saw >= 3
     // houses; that test's bar is now >= 1 house (see ScreenshotTest).
-    public float distance = 4.5f;
-    public float height = 2.0f;
-    public float pitch = 10f;
+    // Phase 1 (2026-11-08): the village is real-size now (temple 10 m,
+    // banyan 13 m, houses 3.5-5.5 m) — the camera steps back a little
+    // (4.5 -> 5.0 m) and up (2.0 -> 2.2 m) so the taller village still
+    // reads over Nilesh's shoulder instead of filling the frame with
+    // the nearest wall.
+    public float distance = 5.0f;
+    public float height = 2.2f;
+    public float pitch = 12f;
 
     private float yaw;
     private float shakeAmount;
@@ -133,8 +138,8 @@ public class CameraFollow : MonoBehaviour
         }
         else
         {
-            transform.position = new Vector3(0f, 2f, -4.5f);
-            transform.rotation = Quaternion.Euler(10f, 0f, 0f);
+            transform.position = new Vector3(0f, 2.2f, -5f);
+            transform.rotation = Quaternion.Euler(12f, 0f, 0f);
         }
         enabled = false;
     }
