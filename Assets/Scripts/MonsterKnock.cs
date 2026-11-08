@@ -26,6 +26,16 @@ public class MonsterKnock : MonoBehaviour
     private float nextKnockAt;
     private bool chaseMode;
 
+    // OVERNIGHT R2: A* path following (VillagePathfinder) + senses.
+    // The old WalkToward was straight-line MoveTowards — the monster
+    // walked through walls, houses and trees (audit 4.6b / 6.5).
+    private System.Collections.Generic.List<Vector3> path =
+        new System.Collections.Generic.List<Vector3>();
+    private int pathIdx;
+    private Vector3 pathTarget;
+    private float repathT;
+    private float loseSightT;
+
     private static readonly string[] kKnockLines = new string[]
     {
         "Awaaz: Nilesh... beta... darwaza kholo... main hoon...",
@@ -60,7 +70,12 @@ public class MonsterKnock : MonoBehaviour
         // Fix-push P2-18a: the monster hunts from night start, not only at
         // knock stage 3 — a player outside the house at night is chased
         // while it is still waiting (stage 1) or walking to the door (2).
-        if ((stage == 1 || stage == 2) && PlayerOutsideHouse())
+        // OVERNIGHT R2: ...but only when it can SENSE the player (see /
+        // hear / very close — CanSensePlayer). The old rule chased any
+        // outside player instantly, even 25 m away behind a house. An
+        // unsensed player is left alone: the monster walks to the door
+        // and knocks, as the story demands.
+        if ((stage == 1 || stage == 2) && PlayerOutsideHouse() && CanSensePlayer())
         {
             if (stage == 1)
             {
@@ -110,9 +125,11 @@ public class MonsterKnock : MonoBehaviour
         }
         else if (stage == 3)
         {
-            // If the player left the house, the monster chases instead.
-            // Fix-push P2-18a: same inside-house rule as the dawn check.
-            if (PlayerOutsideHouse())
+            // If the player left the house, the monster chases instead —
+            // OVERNIGHT R2: only when it can sense the player (see/hear).
+            // A player standing silently far away in the dark is NOT
+            // chased mid-knock; the knocks continue.
+            if (PlayerOutsideHouse() && CanSensePlayer())
             {
                 chaseMode = true;
             }
@@ -131,6 +148,29 @@ public class MonsterKnock : MonoBehaviour
                         GameManager.Instance.ShowSubtitle("Awaaz: ...main phir aaunga, Nilesh...", 3f);
                     }
                     return;
+                }
+                // OVERNIGHT R2: lose the trail — if it can neither see
+                // nor hear the player for 4 s and the player is far, it
+                // gives up the chase and returns to the door to knock.
+                if (CanSensePlayer())
+                {
+                    loseSightT = 0f;
+                }
+                else
+                {
+                    loseSightT += Time.deltaTime;
+                    if (loseSightT > 4f && Vector3.Distance(Flat(monster.position), Flat(player.position)) > 15f)
+                    {
+                        chaseMode = false;
+                        stage = 2;
+                        t = 0f;
+                        loseSightT = 0f;
+                        if (GameManager.Instance != null)
+                        {
+                            GameManager.Instance.ShowSubtitle("...wo tumhe kho baitha. Darwaza band rakho!", 3f);
+                        }
+                        return;
+                    }
                 }
                 WalkToward(player.position, 3.4f);
                 if (Vector3.Distance(Flat(monster.position), Flat(player.position)) < 1.6f)
@@ -220,10 +260,65 @@ public class MonsterKnock : MonoBehaviour
         }
     }
 
+    // OVERNIGHT R2: the monster's senses (audit 6.3 — chase used to
+    // trigger on player-outside-at-night alone, with no vision or
+    // hearing). Three ways to be noticed:
+    //  - PROXIMITY (< 2.5 m): it feels you, even in the dark.
+    //  - HEARING: running footsteps (player speed > 3 m/s) within 14 m.
+    //  - SIGHT: within 20 m, inside a ~150-degree forward cone, with a
+    //    clear line of sight (walls and houses block it — the same
+    //    CanMoveTo walkability the pathfinder uses).
+    private bool CanSensePlayer()
+    {
+        if (player == null || monster == null) return false;
+        Vector3 toPlayer = Flat(player.position) - Flat(monster.position);
+        float dist = toPlayer.magnitude;
+        if (dist < 2.5f) return true;
+        PlayerController pc = player.GetComponent<PlayerController>();
+        if (pc != null && pc.CurrentSpeed > 3.0f && dist < 14f) return true;
+        if (dist < 20f)
+        {
+            float angle = Vector3.Angle(monster.forward, toPlayer);
+            if (angle < 75f && VillagePathfinder.HasLineOfSight(
+                    monster.position + Vector3.up * 2f, player.position + Vector3.up * 1.2f, 0.45f))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void WalkToward(Vector3 target, float speed)
     {
+        // OVERNIGHT R2: A* path following (VillagePathfinder) instead of
+        // straight-line MoveTowards — the old code walked through walls,
+        // houses and trees. Replans every 3 s (or when the target moves),
+        // so a running player is re-tracked. If no path exists, falls
+        // back to the old straight line (never worse than before).
+        repathT -= Time.deltaTime;
+        if (path == null || Vector3.Distance(Flat(pathTarget), Flat(target)) > 1.5f || repathT <= 0f)
+        {
+            repathT = 3f;
+            pathTarget = target;
+            pathIdx = 0;
+            if (path == null) path = new System.Collections.Generic.List<Vector3>();
+            if (!VillagePathfinder.FindPath(monster.position, target, 0.45f, path))
+            {
+                path = null;
+                Debug.LogWarning("[Monster] No path to " + target + " — straight-line fallback");
+            }
+        }
+        Vector3 dest = target;
+        if (path != null && path.Count > 0)
+        {
+            while (pathIdx < path.Count - 1 && Vector3.Distance(Flat(monster.position), Flat(path[pathIdx])) < 0.35f)
+            {
+                pathIdx++;
+            }
+            dest = path[Mathf.Min(pathIdx, path.Count - 1)];
+        }
         Vector3 from = Flat(monster.position);
-        Vector3 to = Flat(target);
+        Vector3 to = Flat(dest);
         Vector3 next = Vector3.MoveTowards(from, to, speed * Time.deltaTime);
         monster.position = new Vector3(next.x, monster.position.y, next.z);
         Vector3 dir = to - from;

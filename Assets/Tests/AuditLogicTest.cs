@@ -197,6 +197,33 @@ public class AuditLogicTest
         }
         else Debug.Log("[Audit] Moon object NOT FOUND by name");
 
+        // ---- OVERNIGHT R2: monster pathfinding (audit 4.6b / 6.5) ----
+        // A path from the monster's jungle spawn (-2,-19) to the player
+        // house door front must exist AND every waypoint must be walkable
+        // (CanMoveTo, same probe height the pathfinder uses) — the old
+        // straight-line walk cut straight through walls and houses.
+        System.Type pfType = GetGameType("VillagePathfinder");
+        if (pfType == null)
+        {
+            Debug.LogWarning("[Audit] R2: VillagePathfinder type not found");
+        }
+        else
+        {
+            MethodInfo findPath = pfType.GetMethod("FindPath", BindingFlags.Public | BindingFlags.Static);
+            var outPath = new System.Collections.Generic.List<Vector3>();
+            bool ok = findPath != null && (bool)findPath.Invoke(null,
+                new object[] { new Vector3(-2f, 0f, -19f), doorFrontPos, 0.45f, outPath });
+            Debug.Log("[Audit] R2 pathfinder: found=" + ok + " waypoints=" + outPath.Count);
+            int bad = 0;
+            foreach (Vector3 wp in outPath)
+            {
+                if (!CanMoveTo(new Vector3(wp.x, 1.0f, wp.z), 0.45f)) bad++;
+            }
+            Debug.Log("[Audit] R2 pathfinder: unwalkable waypoints=" + bad);
+            Assert.IsTrue(ok, "No path from monster spawn to door front — monster cannot reach the door without clipping");
+            Assert.AreEqual(0, bad, "Pathfinder returned unwalkable waypoints (would clip walls)");
+        }
+
         // ---- Counts ----
         GameObject village = GameObject.Find("Village");
         int vc = village != null ? village.GetComponentsInChildren<Transform>(true).Length - 1 : -1;

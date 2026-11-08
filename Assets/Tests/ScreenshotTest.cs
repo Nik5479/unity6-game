@@ -77,9 +77,9 @@ public class ScreenshotTest
         // Mukhiya must be out of the pilot area (by the haveli, x > 10).
         Assert.IsNull(GameObject.Find("Puddle"), "Old opaque Puddle discs still present — pilot water fix missing");
         Assert.IsNotNull(GameObject.Find("WaterPuddle"), "No WaterPuddle discs — pilot water fix missing");
-        // PILOT ROUND 2: the Ambassador is REMOVED (red doors + orange
-        // front painted in its texture — replacement needed, see report).
-        Assert.IsNull(GameObject.Find("HeroCar"), "HeroCar still present — removed as BLOCKER in pilot round 2");
+        // OVERNIGHT (Ambassador FIXED): the car is BACK — the Blender
+        // material split replaced the toy-painted file (see VillageBuilder).
+        Assert.IsNotNull(GameObject.Find("HeroCar"), "HeroCar missing — the fixed Ambassador file should load");
         GameObject mukhiya = GameObject.Find("Mukhiya");
         if (mukhiya != null)
             Assert.Greater(mukhiya.transform.position.x, 10f,

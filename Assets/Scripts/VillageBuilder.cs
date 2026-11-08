@@ -903,7 +903,11 @@ public class VillageBuilder : MonoBehaviour
         if (matMudDry != null)
         {
             matMudWet = CloneTiledMaterial(matMudDry, 3f);
-            if (matMudWet != null) matMudWet.color = new Color(0.53f, 0.48f, 0.42f);
+            // OVERNIGHT R1b: the R1 CI shot proves the wet-lane discs read
+            // as pale streaky rugs (the mud texture's linear streaks at
+            // 0.27 m/tile read as wood grain). Darker toward the ground
+            // tone so the discs read as worn wet earth, not pale ovals.
+            if (matMudWet != null) matMudWet.color = new Color(0.42f, 0.38f, 0.33f);
         }
 
         // Resolve the lit shader once for the flat/emissive materials
@@ -998,15 +1002,12 @@ public class VillageBuilder : MonoBehaviour
         }
         Material m = new Material(s);
         m.name = "WaterPuddle";
-        // OVERNIGHT R1: round 2's water (pale 0.30,0.42,0.55 @ 0.38
-        // alpha, smoothness 0.65) still read as flat light ovals — too
-        // pale, too little reflection. The village HAS a reflection
-        // probe (SetupReflectionProbe, rendered after all models load),
-        // so the discs can actually reflect: deeper sky-blue, more
-        // opaque so the mud stops showing through as a pale slab,
-        // smoothness 1.0 + metallic 0.35 so the probe's sky/lamp
-        // reflection reads as a glint, stronger ripple normal.
-        m.color = new Color(0.16f, 0.22f, 0.30f, 0.55f);
+        // OVERNIGHT R1b: the R1 CI shots cannot identify any puddle as
+        // water — the discs are too small and too pale to read against
+        // the lane. Bigger (0.9–1.4 m), darker and more opaque so they
+        // read as distinct dark standing-water patches on the lane even
+        // without a visible probe reflection.
+        m.color = new Color(0.12f, 0.17f, 0.25f, 0.7f);
         m.SetFloat("_Mode", 3f);
         m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
         m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
@@ -1341,7 +1342,9 @@ public class VillageBuilder : MonoBehaviour
             // discs (main + 2 satellites, offset + smaller) — a single
             // disc, however small, reads as a perfect oval/pancake. A
             // cluster has an irregular shoreline like real standing water.
-            float r = 0.6f + (i % 4) * 0.17f;
+            // OVERNIGHT R1b: bigger (0.9–1.4 m) — the R1 discs were too
+            // small to identify as water at all.
+            float r = 0.9f + (i % 4) * 0.17f;
             float yaw = (i * 53) % 180f;
             Vector3[] lobes = new Vector3[]
             {
@@ -2276,21 +2279,22 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(14f, 0f, 12f), 30f, 2.5f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
             ApplyTractorPbr);
-        // PILOT ROUND 2 — HeroCar REMOVED (BLOCKER, see report): the
-        // wheel fix worked (dark rubber) and the 2.2x blow-out is gone,
-        // but the CI close-up proves the RED doors + ORANGE front are
-        // painted in the body texture itself (blinn1: one material for
-        // body + wheels, one texture). Code cannot repaint one part of a
-        // shared texture, so the toy-painted car is OUT until a proper
-        // replacement arrives (clean cream/white Ambassador, separate
-        // wheel/body materials or a plain paint texture, ~8-40k tris,
-        // full PBR). The story beat (car breaks down at the gate) stays
-        // in the GDD; the car returns with the replacement model.
-        // (Load disabled 2026-11-08; WeatherAmbassador kept for reuse.)
-        // yield return LoadProp("hindustan_ambassador_4_rh04.glb", "HeroCar",
-        //     new Vector3(2.5f, 0f, 15f), 30f, 1.5f,
-        //     GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
-        //     WeatherAmbassador);
+        // OVERNIGHT (Ambassador FIXED, 2026-11-09): the isolated Blender
+        // split SUCCEEDED — the repo file is now the fixed .glb (same
+        // filename, 7,993 tris, geometry byte-identical): BodyCream
+        // (cream 0.887/0.823/0.673, rough 0.35, normal map kept, NO base
+        // texture) + WheelRubber (near-black) + blinn2 glass unchanged.
+        // Verified in the file's own JSON + preview (clean cream/white
+        // Ambassador, dark wheels, no red doors / orange front / yellow
+        // wheels). The car is BACK in the lane at the gate — the story
+        // beat (car breaks down at the gate) returns with it. NOTE: do
+        // NOT run WeatherAmbassador on the fixed file — it targets the
+        // old blinn1 material (gone now) and would force smoothness 0.9
+        // onto the authored BodyCream paint. The original toy file stays
+        // in git history as the backup.
+        yield return LoadProp("hindustan_ambassador_4_rh04.glb", "HeroCar",
+            new Vector3(2.5f, 0f, 15f), 30f, 1.5f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Ancient gate at the north lane entrance — no collider, so the
         // player can walk through the arch.
         yield return LoadProp("ancient_gate_11_4q5m.glb", "Gate",
@@ -2324,7 +2328,8 @@ public class VillageBuilder : MonoBehaviour
         // 1.0 m at the shoulder (a pony-sized dog).
         yield return LoadProp("cow_15_u1bj.glb", "Cow",
             new Vector3(8f, 0f, 14f), 0f, 1.45f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
+            g => AddAnimalRoam(g, new Vector3(8f, 0f, 14f), 4f, 0.5f, false));
         // Replacement 2026-11-07: Boer Goat, 10.4k tris, FULL PBR
         // (the old 1.5k-tri toy goat is gone).
         // Placement fix 2026-11-07: the goat stood at (12, 13) — INSIDE
@@ -2332,15 +2337,18 @@ public class VillageBuilder : MonoBehaviour
         // Now (13, 15): inside the crop field, clear of the tractor.
         yield return LoadProp("boer_goat__3d_model_free_7_dr1w.glb", "Goat",
             new Vector3(13f, 0f, 15f), 0f, 0.7f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
+            g => AddAnimalRoam(g, new Vector3(13f, 0f, 15f), 3.5f, 0.7f, false));
         yield return LoadProp("water_buffalo_18_44fy.glb", "Buffalo",
             new Vector3(6f, 0f, 17f), 0f, 1.45f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
+            g => AddAnimalRoam(g, new Vector3(6f, 0f, 17f), 4f, 0.5f, false));
         // Replacement 2026-11-07: Horse, 70.5k tris, albedo+normal
         // (the old 2.9k-tri horse rendered black).
         yield return LoadProp("horse_6_jrh4.glb", "Horse",
             new Vector3(5f, 0f, 6f), 0f, 1.6f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
+            g => AddAnimalRoam(g, new Vector3(5f, 0f, 6f), 3f, 0.8f, false));
         // Wolf swap 2026-11-08: Dire Wolf Lite (Literock Studios, itch.io),
         // 9,991 tris, FULL PBR, rigged, 4 anims — replaces the old Shiba
         // (4,316 tris, 0 PBR; backed up to fix-backups/wolf-swap-20261108/).
@@ -2349,7 +2357,7 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("Dire_Wolf_Lite.glb", "Wolf",
             new Vector3(-6f, 0f, 8f), 0f, 0.75f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
-            g => GltfModelLoader.PlayEmbeddedAnimation(g, "idle_loop"));
+            g => AddAnimalRoam(g, new Vector3(-6f, 0f, 8f), 4f, 0.9f, true));
     }
 
     // Fix-push P2-18b: a pickup crate like the food one (Box + Pickup).
@@ -2549,10 +2557,12 @@ public class VillageBuilder : MonoBehaviour
         Debug.Log("[Village] Pujari cloth fix applied");
     }
 
-    // OVERNIGHT R1: the oil barrel's texture is toy-saturated red-orange
-    // (verified in the .glb: single "oil_barell" material, textured).
-    // A base-colour multiplier mutes the red without touching the rust
-    // detail in the texture; fine normal grain kills the flat plastic read.
+    // OVERNIGHT R1b: the 0.62/0.55/0.48 mute did NOT dent the red in the
+    // R1 CI shot (the barrel still reads toy-red at the fence). Two
+    // changes: (a) stronger factor, toward grey-brown; (b) apply to ALL
+    // materials on the holder, not just "oil_barell" — and log every
+    // material name found, so the CI log proves which material the
+    // loaded model actually carries (glTFast may rename it).
     private static void MuteOilBarrel(GameObject holder)
     {
         if (holder == null) return;
@@ -2561,10 +2571,11 @@ public class VillageBuilder : MonoBehaviour
         {
             foreach (Material m in r.sharedMaterials)
             {
-                if (m == null || m.name != "oil_barell") continue;
+                if (m == null) continue;
+                Debug.Log("[Village] OilBarrel material: " + m.name);
                 ToUrpLit(m);
                 Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : Color.white;
-                m.SetColor("_BaseColor", new Color(c.r * 0.62f, c.g * 0.55f, c.b * 0.48f, c.a));
+                m.SetColor("_BaseColor", new Color(c.r * 0.5f, c.g * 0.45f, c.b * 0.42f, c.a));
                 m.SetFloat("_Smoothness", 0.55f);
                 if (normal != null)
                 {
@@ -2606,6 +2617,30 @@ public class VillageBuilder : MonoBehaviour
             }
         }
         Debug.Log("[Village] Mukhiya white muted");
+    }
+
+    // OVERNIGHT R2: attach a day/night routine to a loaded NPC.
+    private static void AddNpcRoutine(GameObject g, Vector3 home, Vector3[] waypoints, float walkSpeed, bool idleOnly)
+    {
+        if (g == null) return;
+        NpcRoutine r = g.AddComponent<NpcRoutine>();
+        r.home = home;
+        r.waypoints = waypoints;
+        r.walkSpeed = walkSpeed;
+        r.idleOnly = idleOnly;
+    }
+
+    // OVERNIGHT R2: attach roaming to a loaded animal (wolf starts on
+    // its idle_loop clip; AnimalRoam switches to walk_loop while moving).
+    private static void AddAnimalRoam(GameObject g, Vector3 home, float radius, float speed, bool isWolf)
+    {
+        if (g == null) return;
+        AnimalRoam a = g.AddComponent<AnimalRoam>();
+        a.home = home;
+        a.roamRadius = radius;
+        a.walkSpeed = speed;
+        a.isWolf = isWolf;
+        if (isWolf) GltfModelLoader.PlayEmbeddedAnimation(g, "idle_loop");
     }
 
     // Bullock cart: 2 materials, zero textures. Weathered wood PBR from
@@ -2860,7 +2895,10 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("indian_man_in_dhoti__1__2_kfur.glb", "Pujari",
             new Vector3(4.5f, 0f, -8.5f), 270f, 1.75f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None,
-            g => { if (g != null) { FixPujari(g); g.AddComponent<PilotNpcIdle>(); } });
+            // OVERNIGHT R2: PilotNpcIdle replaced by the day/night routine
+            // (same breathing, plus a small temple-courtyard wander by day
+            // and home at night). The priest no longer stands frozen.
+            g => { if (g != null) { FixPujari(g); AddNpcRoutine(g, new Vector3(4.5f, 0f, -8.5f), new Vector3[] { new Vector3(3.5f, 0f, -10f), new Vector3(6f, 0f, -7f), new Vector3(4.5f, 0f, -8.5f) }, 0.7f, false); } });
         // Fix pass 2026-11-08: yaw 180 faced EAST (south close-up
         // showed his face in profile pointing right) and yaw 90 faced
         // NORTH (south close-up showed only his back). Yaw 270 faces
@@ -2873,7 +2911,10 @@ public class VillageBuilder : MonoBehaviour
         // Second villager (rigged indian_man, sunglasses variant) near the handpump.
         yield return LoadProp("indian_man__sunglasses_76_gmed.glb", "Villager_Man",
             new Vector3(6.5f, 0f, 10.5f), -60f, 1.75f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None,
+            // OVERNIGHT R2: day routine — wanders the handpump / north
+            // lane by day, home at night. (His embedded idle clip keeps playing.)
+            g => AddNpcRoutine(g, new Vector3(6.5f, 0f, 10.5f), new Vector3[] { new Vector3(6.5f, 0f, 10.5f), new Vector3(4.5f, 0f, 9f), new Vector3(8f, 0f, 12f), new Vector3(5f, 0f, 13f) }, 0.8f, false));
         GltfModelLoader.PlayEmbeddedAnimations(GameObject.Find("Villager_Man"));
         // MEERA — second main character (rigged indian_woman_in_saree,
         // like Nilesh: static pose first, animation retargeting is a later
@@ -2881,7 +2922,10 @@ public class VillageBuilder : MonoBehaviour
         // house, facing the player spawn / camera.
         yield return LoadProp("indian_woman_in_saree_84_8ssr.glb", "Meera",
             new Vector3(0.5f, 0f, 6.5f), 180f, 1.70f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None,
+            // OVERNIGHT R2: day routine — wanders the chowk / Nilesh's
+            // house lane by day, home at night. (Her embedded idle clip keeps playing.)
+            g => AddNpcRoutine(g, new Vector3(0.5f, 0f, 6.5f), new Vector3[] { new Vector3(0.5f, 0f, 6.5f), new Vector3(-2f, 0f, 4f), new Vector3(3f, 0f, 8f), new Vector3(-4f, 0f, 9f) }, 0.8f, false));
         GltfModelLoader.PlayEmbeddedAnimations(GameObject.Find("Meera"));
         // MUKHIYA (Meshy, free tier) — the old village headman. PILOT: moved
         // from the chowk (-3.5, 2.5) to his haveli (13.5, -3.5) — he is
@@ -2891,7 +2935,10 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("meshy_mukhiya_87_mky.glb", "Mukhiya",
             new Vector3(13.5f, 0f, -3.5f), 45f, 1.75f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None,
-            MuteMukhiyaWhite);
+            // OVERNIGHT R2: the elder stays by his haveli (unrigged — he
+            // cannot walk), but he is no longer a statue: breathing + he
+            // turns to face a player who comes near.
+            g => { MuteMukhiyaWhite(g); AddNpcRoutine(g, new Vector3(13.5f, 0f, -3.5f), null, 0f, true); });
         // Chickens (user-made on Meshy) — placed ONCE (fix-push P0-4b:
         // was 3 copies of the same 2.4M-tri file; the file itself is
         // replaced with a decimated version by another worker).
@@ -2903,7 +2950,8 @@ public class VillageBuilder : MonoBehaviour
         // reference: chicken near the hero, left of the lane.)
         yield return LoadProp("chicken_73_eoja.glb", "Chicken_1",
             new Vector3(-8.5f, 0f, 9.5f), 40f, 0.45f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None,
+            g => AddAnimalRoam(g, new Vector3(-8.5f, 0f, 9.5f), 3f, 0.9f, false));
         // yield return LoadProp("chicken_73_eoja.glb", "Chicken_2",
         //     new Vector3(7f, 0f, 5.5f), -120f, 0.6f,
         //     GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
