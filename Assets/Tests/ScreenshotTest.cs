@@ -54,15 +54,15 @@ public class ScreenshotTest
         // frustum checks (it lerps into place over ~1 s).
         yield return new WaitForSeconds(1.5f);
 
-        // ROUND 4 follow-up: record the spawn pose — the door shots
-        // (11/12) leave the player INSIDE his house, and the dusk/night
-        // shots must be taken from OUTSIDE (see the dusk block below).
-        Vector3 spawnPos = player.transform.position;
-
         var player = GameObject.Find("Player");
         Assert.IsNotNull(player, "Player not found in Main scene");
         var cam = Camera.main;
         Assert.IsNotNull(cam, "Main Camera not found in Main scene");
+
+        // ROUND 4 follow-up: record the spawn pose — the door shots
+        // (11/12) leave the player INSIDE his house, and the dusk/night
+        // shots must be taken from OUTSIDE (see the dusk block below).
+        Vector3 spawnPos = player.transform.position;
 
         // Phase 1 village: GameManager builds the village at runtime.
         var gm = GameObject.Find("GameManager");
