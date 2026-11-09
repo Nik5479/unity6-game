@@ -21,6 +21,28 @@ public static class VillageColliders
         s_blocks.Remove(b);
     }
 
+    // ROUND 4: remove the (single) small registered volume containing
+    // a point — an animal's own FullBounds entry, whose exact Bounds
+    // may have shifted a hair since registration (pose / normalise),
+    // so List.Remove silently misses. Size-guarded (< 4 m on its
+    // longest horizontal side) so a house/wall footprint can never be
+    // removed by mistake, and vertically overlapped with [0, 2] (the
+    // animal's own height band).
+    public static bool UnregisterContaining(Vector3 pos)
+    {
+        for (int i = s_blocks.Count - 1; i >= 0; i--)
+        {
+            Bounds b = s_blocks[i];
+            if (pos.x < b.min.x || pos.x > b.max.x) continue;
+            if (pos.z < b.min.z || pos.z > b.max.z) continue;
+            if (0f > b.max.y || 2f < b.min.y) continue;
+            if (Mathf.Max(b.size.x, b.size.z) >= 4f) continue;
+            s_blocks.RemoveAt(i);
+            return true;
+        }
+        return false;
+    }
+
     public static void Clear()
     {
         s_blocks.Clear();

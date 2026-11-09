@@ -93,6 +93,11 @@ public class NpcRoutine : MonoBehaviour
     void Update()
     {
         float dt = Time.deltaTime;
+        // ROUND 4: the cycle is created in SetupSystems at FinishBuild
+        // — AFTER all NPCs spawn — so the Start() lookup always
+        // returned null and NPCs never went home at night (the night
+        // branch could never fire). Re-fetch when null.
+        if (cycle == null) cycle = Object.FindFirstObjectByType<DayNightCycle>();
         bool night = stayHomeAtNight && cycle != null && cycle.IsNight;
 
         // Breathing (always — even while standing at home).

@@ -79,6 +79,16 @@ public class AnimalRoam : MonoBehaviour
         VillageColliders.Unregister(b);
         if (!VillageColliders.CanMoveTo(transform.position, 0.4f))
         {
+            // ROUND 4: exact Bounds equality can miss (pose/normalise
+            // shifts the bounds a hair after registration). Fall back to
+            // removing the small registered volume containing my position.
+            if (VillageColliders.UnregisterContaining(transform.position)
+                && VillageColliders.CanMoveTo(transform.position, 0.4f))
+            {
+                Debug.Log("[AnimalRoam] " + gameObject.name
+                    + " removed its own collider block (containment fallback), free to roam from " + transform.position);
+                return;
+            }
             // Something ELSE still blocks my spawn (e.g. I was placed
             // inside a house footprint) — say so loudly; no roam fix can
             // move me out. Needs a VillageBuilder placement move.
