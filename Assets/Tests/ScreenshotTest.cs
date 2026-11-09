@@ -54,6 +54,11 @@ public class ScreenshotTest
         // frustum checks (it lerps into place over ~1 s).
         yield return new WaitForSeconds(1.5f);
 
+        // ROUND 4 follow-up: record the spawn pose — the door shots
+        // (11/12) leave the player INSIDE his house, and the dusk/night
+        // shots must be taken from OUTSIDE (see the dusk block below).
+        Vector3 spawnPos = player.transform.position;
+
         var player = GameObject.Find("Player");
         Assert.IsNotNull(player, "Player not found in Main scene");
         var cam = Camera.main;
@@ -430,6 +435,23 @@ public class ScreenshotTest
         Assert.IsNotNull(shot9, "Screenshot 9 (Nilesh face) failed to render");
         Assert.IsTrue(File.Exists(shot9), "Screenshot 9 file missing: " + shot9);
 
+        // ROUND 4 follow-up, shot 13: House_2's front fence — the
+        // spawn-area fence whose blue window showed through the planks
+        // in the emulator shot-05 (House_2 atlas repainted wood-brown,
+        // see the rebuilt indian_house_old .glb). Camera south-west of
+        // House_2, looking north-east at the fence + porch.
+        Behaviour followF = cam.GetComponent("CameraFollow") as Behaviour;
+        if (followF != null) followF.enabled = false;
+        cam.transform.position = new Vector3(3f, 2.5f, 1f);
+        cam.transform.LookAt(new Vector3(9f, 1.5f, 8f));
+        yield return null;
+        string shot13 = RenderScreenshot(cam, "house2-fence.png", 1280, 720);
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (followF != null) followF.enabled = true;
+        Assert.IsNotNull(shot13, "Screenshot 13 (House_2 fence) failed to render");
+        Assert.IsTrue(File.Exists(shot13), "Screenshot 13 file missing: " + shot13);
+
         // ROUND 4 (door): the player flow must work end to end — open
         // the door via the REAL TryInteract path (not SetOpen), then walk
         // inside. Shot 11 is the open door from the front (frame + dark
@@ -512,6 +534,21 @@ public class ScreenshotTest
         Assert.IsNotNull(shot12, "Screenshot 12 (player inside) failed to render");
         Assert.IsTrue(File.Exists(shot12), "Screenshot 12 file missing: " + shot12);
 
+        // ROUND 4 follow-up (dusk/night shots were obstructed): shots
+        // 11/12 leave the player INSIDE his house, so the gameplay
+        // camera (3.4 m behind him, collision-clamped to 1.2 m inside
+        // the hut) shoots the thatch roof + a roof beam instead of the
+        // dusk sky. Teleport the player back to the recorded spawn pose,
+        // reset the gameplay camera and let the follow settle before
+        // the dusk/night shots — the same state shot 1 was taken in.
+        player.transform.position = new Vector3(spawnPos.x, 0.5f, spawnPos.z);
+        Behaviour followDusk = cam.GetComponent("CameraFollow") as Behaviour;
+        if (followDusk != null) followDusk.enabled = false;
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (followDusk != null) followDusk.enabled = true;
+        yield return new WaitForSeconds(2.5f);
+
         // ROUND 4 (look): dusk shot — the golden-hour look is the whole
         // point of this round, so prove it: drive the cycle to mid-dusk
         // and shoot from the gameplay camera. The sun must read orange
@@ -553,7 +590,7 @@ public class ScreenshotTest
         Assert.IsNotNull(shot4, "Night angle-2 screenshot failed to render");
         Assert.IsTrue(File.Exists(shot4), "Night angle-2 screenshot file missing: " + shot4);
 
-        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot11 + " | " + shot12 + " | " + shot10 + " | " + shot3 + " | " + shot4);
+        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot13 + " | " + shot11 + " | " + shot12 + " | " + shot10 + " | " + shot3 + " | " + shot4);
         yield return null;
     }
 
