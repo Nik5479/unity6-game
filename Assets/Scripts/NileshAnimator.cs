@@ -47,6 +47,9 @@ public class NileshAnimator : MonoBehaviour
         AddClip("NileshSprint");
         AddClip("NileshCrouchWalk");
         AddClip("NileshJump");
+        // Phone-video fix: resolve the arm bones for the LateUpdate swing
+        // dampener (see ArmDampKeep). Null-safe if the rig lacks them.
+        ResolveArmBones(nilesh);
         if (anim.GetClip("NileshIdle") == null)
         {
             Debug.LogWarning("[NileshAnimator] Remapped clips missing — using embedded idle clip");
@@ -70,6 +73,87 @@ public class NileshAnimator : MonoBehaviour
     }
 
     private bool hasWalk, hasRun, hasSprint, hasCrouch, hasJump;
+
+    // ARM-DAMPEN (phone-video fix 2026-11-09): the Mixamo run/sprint
+    // clips pump the arms far too hard — measured from the .anim curves,
+    // NileshRun swings the upper arms 26-28 deg peak-to-peak and the
+    // forearms 45-52 deg; NileshSprint swings the right arm 39 deg and
+    // both forearms 31-53 deg. The user wants GTA-like movement with NO
+    // exaggerated arm/leg swinging. The legacy Animation component writes
+    // the bone rotations before LateUpdate, so LateUpdate slerps each arm
+    // bone toward its own slow-moving average — the swing is halved
+    // around the clip's natural mean posture (bent elbows stay bent, the
+    // arms just travel half as far), with no reference pose to capture
+    // and no .anim file to regenerate. Idle/crouch/jump are untouched.
+    // Bones are resolved by glTF node name (LeftArm_013 etc.); every
+    // lookup is null-guarded, so a missing bone is a silent no-op.
+    private Transform[] armBones;
+    private Quaternion[] armAvg;
+    private bool[] armAvgInit;
+    private static readonly string[] kArmBoneNames = new string[]
+    {
+        "LeftShoulder_012", "RightShoulder_038",
+        "LeftArm_013", "RightArm_039",
+        "LeftForeArm_014", "RightForeArm_040",
+    };
+
+    private void ResolveArmBones(GameObject nilesh)
+    {
+        Transform[] all = nilesh.GetComponentsInChildren<Transform>(true);
+        armBones = new Transform[kArmBoneNames.Length];
+        armAvg = new Quaternion[kArmBoneNames.Length];
+        armAvgInit = new bool[kArmBoneNames.Length];
+        for (int i = 0; i < kArmBoneNames.Length; i++)
+        {
+            foreach (Transform t in all)
+            {
+                if (t.name == kArmBoneNames[i] || t.name.EndsWith("/" + kArmBoneNames[i]))
+                {
+                    armBones[i] = t;
+                    break;
+                }
+            }
+            if (armBones[i] == null)
+                Debug.LogWarning("[NileshAnimator] Arm bone not found: " + kArmBoneNames[i] + " — arm dampen skips it");
+        }
+    }
+
+    // Damp factor for the current clip: 1 = untouched, 0 = frozen at the
+    // running average. Run/sprint keep 45% of the swing (26-39 deg ->
+    // ~12-18 deg upper arm, 45-53 deg -> ~20-24 deg forearm); walk keeps
+    // 70%; everything else is untouched.
+    private float ArmDampKeep()
+    {
+        if (current == "NileshRun" || current == "NileshSprint") return 0.45f;
+        if (current == "NileshWalk") return 0.7f;
+        return 1f;
+    }
+
+    void LateUpdate()
+    {
+        if (anim == null || armBones == null) return;
+        float keep = ArmDampKeep();
+        if (keep >= 1f) return;
+        float dt = Time.deltaTime;
+        if (dt <= 0f) return;
+        // The average follows slowly (~0.5 s time constant) so it tracks
+        // the clip's mean posture through a crossfade without snapping.
+        float follow = 1f - Mathf.Exp(-dt * 2f);
+        for (int i = 0; i < armBones.Length; i++)
+        {
+            Transform b = armBones[i];
+            if (b == null) continue;
+            Quaternion cur = b.localRotation;
+            if (!armAvgInit[i])
+            {
+                armAvg[i] = cur;
+                armAvgInit[i] = true;
+                continue;
+            }
+            armAvg[i] = Quaternion.Slerp(armAvg[i], cur, follow);
+            b.localRotation = Quaternion.Slerp(armAvg[i], cur, keep);
+        }
+    }
 
     private bool SetLoop(string name)
     {

@@ -95,6 +95,97 @@ public class ScreenshotTest
         // ACTIVE objects, so null here proves it is hidden, not missing.
         Assert.IsNull(GameObject.Find("Moon"), "Moon visible in day sky — SetMoon(0) must hide the disc");
 
+        // (a4) PHONE-VIDEO 2026-11-09: the flat-disc fix — every ground
+        // patch (lane / chowk / grass / variation) must be a TEXTURED
+        // flat patch, never a texture-less flat-colour plate. The old
+        // matMudFlat discs read as pale grey floating plates on the phone
+        // (frames 22s/37s) and in CI. Assert on the materials: a patch
+        // whose material has no main texture is a flat plate.
+        int texturedPatches = 0;
+        int flatPatches = 0;
+        foreach (Transform t in village.GetComponentsInChildren<Transform>(true))
+        {
+            if (t.name != "DirtPath" && t.name != "DirtPathEW" && t.name != "ChowkCobble"
+                && t.name != "GrassPatch" && t.name != "GroundPatch") continue;
+            Renderer pr = t.GetComponent<Renderer>();
+            if (pr == null || pr.sharedMaterial == null) { flatPatches++; continue; }
+            Material pm = pr.sharedMaterial;
+            if (pm.mainTexture == null || pm.name.Contains("MudFlat")) flatPatches++;
+            else texturedPatches++;
+            Debug.Log("[Test] Ground patch " + t.name + " mat=" + pm.name
+                + " tex=" + (pm.mainTexture != null ? pm.mainTexture.name : "NULL"));
+        }
+        Debug.Log("[Test] Textured ground patches: " + texturedPatches + ", flat/texture-less: " + flatPatches);
+        Assert.Greater(texturedPatches, 30, "Too few textured ground patches (" + texturedPatches + ") — flat-patch fix missing");
+        Assert.AreEqual(0, flatPatches, "Texture-less flat ground plates still present (" + flatPatches + ") — the MudFlat discs must be gone");
+
+        // (a5) PHONE-VIDEO 2026-11-09: palm + stilt-house material fixes.
+        // Palm: HP_Palm3_* materials must be URP Lit (not the Shader Graph
+        // foliage path that goes dark on the phone), leaves with an alpha
+        // cutout. Stilt house (House_6): its Material.002 must be URP Lit
+        // with a real base map. A model that failed to load skips its
+        // check (warn, don't fail the whole suite on a load flake).
+        GameObject palm = GameObject.Find("Tree_Palm");
+        if (palm == null)
+        {
+            Debug.LogWarning("[Test] Tree_Palm missing — palm material check skipped");
+        }
+        else
+        {
+            int palmLit = 0;
+            int palmCutout = 0;
+            foreach (Renderer r in palm.GetComponentsInChildren<Renderer>())
+            {
+                foreach (Material m in r.sharedMaterials)
+                {
+                    if (m == null || !m.name.StartsWith("HP_Palm3_")) continue;
+                    bool isLit = m.shader != null && m.shader.name == "Universal Render Pipeline/Lit";
+                    if (isLit) palmLit++;
+                    if (isLit && m.name.Contains("Leaf") && m.HasProperty("_AlphaClip") && m.GetFloat("_AlphaClip") > 0.5f) palmCutout++;
+                    Debug.Log("[Test] Palm material " + m.name + " shader=" + (m.shader != null ? m.shader.name : "NULL")
+                        + " tex=" + (m.mainTexture != null) + " alphaClip=" + (m.HasProperty("_AlphaClip") ? m.GetFloat("_AlphaClip").ToString("F1") : "n/a"));
+                }
+            }
+            Assert.GreaterOrEqual(palmLit, 3, "Palm materials not converted to URP Lit (" + palmLit + "/3) — dark-palm fix missing");
+            Assert.GreaterOrEqual(palmCutout, 2, "Palm leaf cutout not restored (" + palmCutout + "/2) — fronds render as solid cards");
+        }
+        GameObject house6 = GameObject.Find("House_6");
+        if (house6 == null)
+        {
+            Debug.LogWarning("[Test] House_6 missing — stilt-house material check skipped");
+        }
+        else
+        {
+            bool house6Real = false;
+            bool house6Lit = false;
+            foreach (Renderer r in house6.GetComponentsInChildren<Renderer>())
+            {
+                foreach (Material m in r.sharedMaterials)
+                {
+                    if (m == null || m.name != "Material.002") continue;
+                    house6Real = true;
+                    if (m.shader != null && m.shader.name == "Universal Render Pipeline/Lit" && m.mainTexture != null) house6Lit = true;
+                }
+            }
+            if (!house6Real) Debug.LogWarning("[Test] House_6 has no Material.002 (primitive fallback?) — stilt-house check skipped");
+            else Assert.IsTrue(house6Lit, "House_6 Material.002 is not URP Lit + textured — stilt-house fix missing");
+        }
+
+        // (a6) PHONE-VIDEO 2026-11-09: NPC positions — Meera and the
+        // Villager must be standing in the village, not outside the walls
+        // and not floating/sunk. Positions only; routines are Worker C's.
+        // (No origin check: a wandering NPC legitimately crosses x=0.)
+        foreach (string npcName in new string[] { "Meera", "Villager_Man" })
+        {
+            GameObject npc = GameObject.Find(npcName);
+            if (npc == null) { Debug.LogWarning("[Test] NPC " + npcName + " missing — position check skipped"); continue; }
+            Vector3 np = npc.transform.position;
+            Debug.Log("[Test] NPC " + npcName + " at " + np.ToString("F2"));
+            Assert.LessOrEqual(Mathf.Abs(np.x), 25f, "NPC " + npcName + " outside the village (x=" + np.x + ")");
+            Assert.LessOrEqual(Mathf.Abs(np.z), 25f, "NPC " + npcName + " outside the village (z=" + np.z + ")");
+            Assert.LessOrEqual(Mathf.Abs(np.y), 0.5f, "NPC " + npcName + " floating/sunk (y=" + np.y + ")");
+        }
+
         // (b) Houses must be visible from the gameplay camera.
         Plane[] planes = GeometryUtility.CalculateFrustumPlanes(cam);
         string[] houseNames = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6" };
@@ -239,6 +330,51 @@ public class ScreenshotTest
         Assert.IsNotNull(shot6, "Screenshot 6 (village-east) failed to render");
         Assert.IsTrue(File.Exists(shot6), "Screenshot 6 file missing: " + shot6);
 
+        // PHONE-VIDEO 2026-11-09, screenshots 7-9: close-ups that prove
+        // the three fixes — the ground lane (no more flat plates), the
+        // stilt house (House_6, wood + thatch, not sketch-white), and
+        // Nilesh's face from the FRONT (the phone video only ever showed
+        // the back of his head). Same save/restore pattern as shots 2/5/6.
+        Behaviour follow3 = cam.GetComponent("CameraFollow") as Behaviour;
+        if (follow3 != null) follow3.enabled = false;
+        // (7) Ground close-up: low over the north-south dirt lane, looking
+        // down the lane toward the chowk — lane patches + ground texture.
+        cam.transform.position = new Vector3(3f, 1.5f, -8f);
+        cam.transform.LookAt(new Vector3(0f, 0f, -3f));
+        yield return null;
+        string shot7 = RenderScreenshot(cam, "ground-closeup.png", 1280, 720);
+        Assert.IsNotNull(shot7, "Screenshot 7 (ground close-up) failed to render");
+        Assert.IsTrue(File.Exists(shot7), "Screenshot 7 file missing: " + shot7);
+
+        // (8) Stilt house: House_6 at (13,0,-14) from the south-west, eye
+        // level — walls, timber framing, stilts and roof in one frame.
+        cam.transform.position = new Vector3(6f, 3f, -6f);
+        cam.transform.LookAt(new Vector3(13f, 2.5f, -14f));
+        yield return null;
+        string shot8 = RenderScreenshot(cam, "stilt-house.png", 1280, 720);
+        Assert.IsNotNull(shot8, "Screenshot 8 (stilt house) failed to render");
+        Assert.IsTrue(File.Exists(shot8), "Screenshot 8 file missing: " + shot8);
+
+        // (9) Nilesh face close-up (FRONT view): the camera goes to the
+        // opposite side of the player from the gameplay camera (which
+        // always sits behind him), at head height, looking back at his
+        // face. Uses the saved gameplay-camera position as the "behind"
+        // reference — player.transform.forward is not reliable here.
+        Vector3 facePos = player.transform.position;
+        Vector3 behind = savedPos - facePos;
+        behind.y = 0f;
+        if (behind.sqrMagnitude < 0.01f) behind = new Vector3(0f, 0f, -1f);
+        behind.Normalize();
+        cam.transform.position = facePos - behind * 2.5f + new Vector3(0f, 1.6f, 0f);
+        cam.transform.LookAt(facePos + new Vector3(0f, 1.5f, 0f));
+        yield return null;
+        string shot9 = RenderScreenshot(cam, "nilesh-face.png", 1280, 720);
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (follow3 != null) follow3.enabled = true;
+        Assert.IsNotNull(shot9, "Screenshot 9 (Nilesh face) failed to render");
+        Assert.IsTrue(File.Exists(shot9), "Screenshot 9 file missing: " + shot9);
+
         // PILOT night shots: the reference images are NIGHT scenes and
         // every screenshot so far was DAY. Drive the cycle to night and
         // shoot the pilot from the gameplay camera (lamp + wet road) and
@@ -268,7 +404,7 @@ public class ScreenshotTest
         Assert.IsNotNull(shot4, "Night angle-2 screenshot failed to render");
         Assert.IsTrue(File.Exists(shot4), "Night angle-2 screenshot file missing: " + shot4);
 
-        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot3 + " | " + shot4);
+        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot3 + " | " + shot4);
         yield return null;
     }
 

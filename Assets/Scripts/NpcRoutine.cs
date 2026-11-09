@@ -13,6 +13,26 @@ using UnityEngine;
 /// clip (their .glb files carry only an idle clip) — the slow pace +
 /// small bob reads as a shuffle; a real walk-cycle remap for NPCs is
 /// out of scope for tonight.
+///
+/// PHONE-VIDEO FIX (2026-11-09, Worker C): Meera stood frozen for the
+/// whole 38 s phone video even though this routine ran. Root cause, proven
+/// from the .glb bounds + the collider registry: the pathfinder RELOCATES
+/// a blocked goal to the nearest free cell (VillagePathfinder.NearestFree)
+/// but this script checked arrival against the RAW waypoint. Meera's
+/// waypoint (3, 8) sits 0.22 m from House_2's west wall (registered
+/// footprint x[3.22, 14.78] z[2.23, 13.77]) — inside the 0.4 m walk
+/// radius — so the goal relocated to (2.5, 7.5), 0.71 m from the waypoint,
+/// and the "< 0.5 m from waypoint" arrival test NEVER passed: she walked
+/// to the wall once, then stood there forever with walking=true, repathing
+/// every 3 s. Same defect on (-4, 9) (0.32 m from House_Player's east wall
+/// x=-4.32) and Pujari's (3.5, -10) (0.10 m from the Temple's south face).
+/// Fix: arrival is now checked against walkGoal — the ACTUAL reachable
+/// destination (last path point, or the raw target for direct steer) — plus
+/// a watchdog that abandons a trip that makes no progress, so no NPC can
+/// freeze forever on an unreachable waypoint again. Waypoint data itself
+/// still wants the VillageBuilder patch (see report): (3,8)->(2,8),
+/// (-4,9)->(-3,9), Pujari (3.5,-10)->(3.5,-8.5), and Villager_Man's whole
+/// spawn is INSIDE House_2 and must move.
 /// </summary>
 public class NpcRoutine : MonoBehaviour
 {
@@ -34,6 +54,16 @@ public class NpcRoutine : MonoBehaviour
     private Transform player;
     private float stuckT;
     private Vector3 lastPos;
+    // PHONE-VIDEO FIX: the reachable destination of the current trip.
+    // VillagePathfinder relocates a blocked goal to the nearest free cell,
+    // so the last path point — not the raw waypoint — is what "arrived"
+    // must be measured against, or the NPC waits forever 0.5-1 m short.
+    private Vector3 walkGoal;
+    // PHONE-VIDEO FIX: watchdog — a trip that makes no progress (goal
+    // unreachable even after relocation, or the NPC spawned inside a
+    // collider) is abandoned instead of freezing the NPC forever.
+    private float walkT;
+    private const float kMaxTripTime = 12f;
 
     void Start()
     {
@@ -43,6 +73,17 @@ public class NpcRoutine : MonoBehaviour
         GameObject p = GameObject.Find("Player");
         if (p != null) player = p.transform;
         lastPos = transform.position;
+        walkGoal = transform.position;
+        // PHONE-VIDEO FIX: loud spawn check. An NPC whose spawn sits inside
+        // a registered blocker (Villager_Man: home (6.5, 10.5) is inside
+        // House_2's footprint x[3.22, 14.78] z[2.23, 13.77]) can never take
+        // a step — no routine fix can move it out. This error names it in
+        // the CI log instead of leaving a silently frozen NPC in the game.
+        if (!VillageColliders.CanMoveTo(transform.position, 0.4f))
+        {
+            Debug.LogError("[NpcRoutine] " + gameObject.name + " spawned INSIDE a collider at "
+                + transform.position + " — it can never move. Move its spawn in VillageBuilder.");
+        }
     }
 
     void Update()
@@ -62,15 +103,30 @@ public class NpcRoutine : MonoBehaviour
 
         if (night)
         {
-            // Go home and stay there.
-            if (Vector3.Distance(Flat(transform.position), Flat(home)) > 0.6f)
+            // Go home and stay there. Arrival is measured against walkGoal
+            // (the reachable point near home), not raw home — same
+            // relocation rule as the day trips — and the watchdog applies,
+            // so a sealed home can never freeze the NPC either.
+            WalkTo(home, dt);
+            if (Vector3.Distance(Flat(transform.position), Flat(walkGoal)) < 0.6f)
             {
-                WalkTo(home, dt);
+                walking = false;
+                walkT = 0f;
+                FacePlayerIfNear(dt);
             }
             else
             {
-                walking = false;
-                FacePlayerIfNear(dt);
+                walking = true;
+                walkT += dt;
+                if (walkT > kMaxTripTime)
+                {
+                    Debug.LogWarning("[NpcRoutine] " + gameObject.name
+                        + " could not reach home " + home + " in "
+                        + kMaxTripTime + "s — standing at "
+                        + transform.position + " for the night.");
+                    walking = false;
+                    walkT = 0f;
+                }
             }
             return;
         }
@@ -78,10 +134,32 @@ public class NpcRoutine : MonoBehaviour
         if (walking)
         {
             WalkTo(pathTarget, dt);
-            if (Vector3.Distance(Flat(transform.position), Flat(pathTarget)) < 0.5f)
+            // PHONE-VIDEO FIX: arrive against walkGoal (the reachable
+            // destination), not the raw waypoint — the pathfinder may have
+            // relocated the goal up to ~1 m, and the old test never passed.
+            if (Vector3.Distance(Flat(transform.position), Flat(walkGoal)) < 0.5f)
             {
                 walking = false;
                 pauseT = Random.Range(2f, 5f);
+            }
+            else
+            {
+                // PHONE-VIDEO FIX: watchdog — a trip that makes no progress
+                // (entombed spawn, sealed goal) is abandoned and the
+                // waypoint skipped, instead of freezing the NPC forever.
+                walkT += dt;
+                if (walkT > kMaxTripTime)
+                {
+                    Debug.LogWarning("[NpcRoutine] " + gameObject.name
+                        + " abandoned trip to " + pathTarget + " after "
+                        + kMaxTripTime + "s without arriving (from "
+                        + transform.position + ") — waypoint skipped.");
+                    walking = false;
+                    pauseT = Random.Range(2f, 4f);
+                    walkT = 0f;
+                    if (waypoints != null && waypoints.Length > 0)
+                        wpIndex = (wpIndex + 1) % waypoints.Length;
+                }
             }
             return;
         }
@@ -94,6 +172,8 @@ public class NpcRoutine : MonoBehaviour
         path.Clear();
         pathIdx = 0;
         repathT = 0f;
+        walkGoal = pathTarget;
+        walkT = 0f;
         walking = true;
     }
 
@@ -110,9 +190,16 @@ public class NpcRoutine : MonoBehaviour
                 // No path (should not happen for open wander spots) —
                 // direct steer with collision slide instead.
                 path.Clear();
+                // PHONE-VIDEO FIX: the fallback steers at the raw target,
+                // so that IS the arrival goal.
+                walkGoal = target;
                 DirectSteer(target, dt);
                 return;
             }
+            // PHONE-VIDEO FIX: the pathfinder may have relocated a blocked
+            // goal to the nearest free cell — the LAST path point is the
+            // real destination. Arriving there counts as arriving.
+            if (path.Count > 0) walkGoal = path[path.Count - 1];
         }
         Vector3 dest = path[Mathf.Min(pathIdx, path.Count - 1)];
         while (pathIdx < path.Count - 1 && Vector3.Distance(Flat(transform.position), Flat(path[pathIdx])) < 0.35f)

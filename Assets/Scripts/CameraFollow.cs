@@ -62,6 +62,138 @@ public class CameraFollow : MonoBehaviour
     private Vector3 prevTargetPos;
     private bool hasPrevTargetPos;
 
+    // PHONE-VIDEO FIX (2026-11-09, Worker C): camera occluders the shared
+    // registry misses. The phone video (~21-24 s) shows the camera going
+    // INSIDE the wooden slats of the stilt structure — the Dock pier at
+    // (-7, 19) is ColliderMode.None, so VillageColliders has no entry for
+    // it at all — and the stilt house. Two holes in the old test:
+    //   (a) VillageColliders.CameraRay SKIPS any volume containing the ray
+    //       origin (the player's head) — right for standing inside a house,
+    //       wrong for a stilt house / porch overhang, where the head can sit
+    //       inside the big rendered AABB while the camera is still out in
+    //       the open and then swings into the slats;
+    //   (b) ColliderMode.None structures are never registered, and low
+    //       volumes are filtered out by the >= 1.5 m height rule (audit M1).
+    // Fix, all inside this file (VillageBuilder is owned by another worker):
+    // collect the big structures' rendered bounds from the scene itself,
+    // ray-test them here with origin-inside handling, and take the nearest
+    // hit of the two tests. Framing (distance 3.4 / height 1.15 / pitch 5)
+    // is untouched — only collision.
+    private readonly System.Collections.Generic.List<Bounds> camOccluders =
+        new System.Collections.Generic.List<Bounds>();
+    private bool occludersCollected;
+    // PHONE-VIDEO FIX: smooth the camera DISTANCE along the head->want ray
+    // instead of lerping the position. The old position Lerp let the camera
+    // arc through walls during fast yaw turns (the lerped point sits off
+    // the collision-checked ray); on the ray, every frame's position is a
+    // collision-safe distance by construction.
+    private float currentDist;
+    private bool hasCurrentDist;
+
+    void OnEnable()
+    {
+        // ResetToStarterView disables this component; on re-enable the
+        // distance smoothing must re-seed from the live camera position.
+        hasCurrentDist = false;
+    }
+
+    // Collect camera occluders from the scene itself. Runs lazily until the
+    // runtime-built village exists (the camera is added by VillageBuilder,
+    // possibly before the structures spawn). One-time cost.
+    private void EnsureOccluders()
+    {
+        if (occludersCollected) return;
+        if (GameObject.Find("House_Player") == null && GameObject.Find("Dock") == null) return;
+        occludersCollected = true;
+        string[] roots = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6",
+            "Temple", "School", "Haveli", "Clinic", "Dock", "Well", "Gate",
+            "HeroCar", "Tractor", "Cart", "BullockCart",
+            "Tree_Mango", "Tree_Banyan", "Tree_Palm" };
+        foreach (string name in roots)
+        {
+            GameObject go = GameObject.Find(name);
+            if (go == null) continue;
+            Renderer[] rr = go.GetComponentsInChildren<Renderer>();
+            if (rr.Length == 0) continue;
+            Bounds b = rr[0].bounds;
+            foreach (Renderer r in rr) b.Encapsulate(r.bounds);
+            camOccluders.Add(b);
+        }
+        // Fence segments: 9 segments x 4 boxes, all named FencePostA/B /
+        // FenceRailTop/Low. Their 1.2 m height sits below the head->camera
+        // ray (head 1.4 m, camera ~1.95 m), so they rarely trigger — included
+        // so the camera can never dip into a fence line if framing ever lowers.
+        foreach (Transform t in Object.FindObjectsByType<Transform>(FindObjectsSortMode.None))
+        {
+            if (!t.name.StartsWith("Fence")) continue;
+            Renderer r = t.GetComponent<Renderer>();
+            if (r != null) camOccluders.Add(r.bounds);
+        }
+        Debug.Log("[Camera] Occluders collected: " + camOccluders.Count + " volumes");
+    }
+
+    // Ray vs one AABB, slab method. Unlike Bounds.IntersectRay, a ray that
+    // STARTS inside the box is handled: tExit is the distance to the far
+    // wall, so the caller can tell whether the WANTED camera point (at
+    // maxDist) is still inside the box.
+    private static bool RayBox(Vector3 origin, Vector3 dir, Bounds b, float maxDist, out float tEnter, out float tExit)
+    {
+        tEnter = 0f;
+        tExit = maxDist;
+        float t0 = 0f, t1 = maxDist;
+        for (int a = 0; a < 3; a++)
+        {
+            float o = a == 0 ? origin.x : (a == 1 ? origin.y : origin.z);
+            float d = a == 0 ? dir.x : (a == 1 ? dir.y : dir.z);
+            float mn = a == 0 ? b.min.x : (a == 1 ? b.min.y : b.min.z);
+            float mx = a == 0 ? b.max.x : (a == 1 ? b.max.y : b.max.z);
+            if (Mathf.Abs(d) < 1e-8f)
+            {
+                if (o < mn || o > mx) return false;
+            }
+            else
+            {
+                float inv = 1f / d;
+                float ta = (mn - o) * inv;
+                float tb = (mx - o) * inv;
+                if (ta > tb) { float tmp = ta; ta = tb; tb = tmp; }
+                t0 = Mathf.Max(t0, ta);
+                t1 = Mathf.Min(t1, tb);
+                if (t0 > t1) return false;
+            }
+        }
+        tEnter = t0;
+        tExit = t1;
+        return true;
+    }
+
+    // Nearest camera hit over the scene-discovered occluders. Origin-inside
+    // boxes: the camera is inside the box only when the wanted point lies
+    // before the far wall (maxDist <= tExit) — then pull in to the 1.2 m
+    // minimum instead of skipping the box entirely (the old skip is what
+    // let the camera into the stilt house). Head inside but camera past the
+    // far wall means the camera is out in the open: no pull needed.
+    private bool CameraRayLocal(Vector3 origin, Vector3 dir, float maxDist, out float hitDist)
+    {
+        hitDist = maxDist;
+        bool hit = false;
+        foreach (Bounds b in camOccluders)
+        {
+            float tEnter, tExit;
+            if (!RayBox(origin, dir, b, maxDist, out tEnter, out tExit)) continue;
+            if (tEnter >= 0f)
+            {
+                if (tEnter < hitDist) { hitDist = tEnter; hit = true; }
+            }
+            else if (maxDist <= tExit)
+            {
+                // Pull in tight: 1.6 pre-margin -> 1.2 m after the 0.4 margin.
+                if (1.6f < hitDist) { hitDist = 1.6f; hit = true; }
+            }
+        }
+        return hit;
+    }
+
     void Start()
     {
         if (target != null)
@@ -144,22 +276,62 @@ public class CameraFollow : MonoBehaviour
         // wanted position; on a hit, pull the camera just in front of the
         // obstacle. Default view is unchanged (no hit on open ground), so
         // the screenshot test's >= 1 house framing is unaffected.
+        // PHONE-VIDEO FIX: two tests now — the shared registry (houses,
+        // walls, fences as movement blockers) AND the scene-discovered
+        // occluders (Dock / stilt house / any ColliderMode.None structure
+        // the registry never sees, with origin-inside handling). Take the
+        // nearest hit of the two.
         Vector3 headPos = target.position + Vector3.up * 1.4f;
         Vector3 toCam = want - headPos;
         float toCamDist = toCam.magnitude;
-        // Audit M1: test against the village's blocking volumes only (no
-        // unmasked Physics.Raycast that hit fence rails/crates and missed
-        // every glTF house).
-        float hitDist;
-        if (toCamDist > 0.01f
-            && VillageColliders.CameraRay(headPos, toCam.normalized, toCamDist, out hitDist))
+        if (toCamDist > 0.01f)
         {
-            want = headPos + toCam.normalized * hitDist - toCam.normalized * 0.4f;
-            if (Vector3.Distance(want, headPos) < 1.2f)
-                want = headPos + toCam.normalized * 1.2f;
+            EnsureOccluders();
+            float hitDist = toCamDist;
+            bool hit = false;
+            float d;
+            if (VillageColliders.CameraRay(headPos, toCam.normalized, toCamDist, out d) && d < hitDist)
+            {
+                hitDist = d;
+                hit = true;
+            }
+            if (CameraRayLocal(headPos, toCam.normalized, toCamDist, out d) && d < hitDist)
+            {
+                hitDist = d;
+                hit = true;
+            }
+            if (hit)
+            {
+                want = headPos + toCam.normalized * hitDist - toCam.normalized * 0.4f;
+                if (Vector3.Distance(want, headPos) < 1.2f)
+                    want = headPos + toCam.normalized * 1.2f;
+            }
         }
 
-        transform.position = Vector3.Lerp(transform.position, want, 1f - Mathf.Exp(-8f * Time.deltaTime));
+        // PHONE-VIDEO FIX: smooth the DISTANCE along the head->want ray,
+        // not the position. The old position Lerp let the camera arc through
+        // walls on fast yaw turns (the lerped point sits off the
+        // collision-checked ray). On the ray, the camera is always at a
+        // collision-safe distance by construction. Pull-in is instant (a
+        // wall swinging in front of the lens must not leave the camera
+        // inside it for a single frame); pull-out eases at the old 8/s so
+        // the view does not snap.
+        float wantDist = Vector3.Distance(headPos, want);
+        if (!hasCurrentDist)
+        {
+            currentDist = Vector3.Distance(headPos, transform.position);
+            hasCurrentDist = true;
+        }
+        if (wantDist < currentDist)
+        {
+            currentDist = wantDist;
+        }
+        else
+        {
+            currentDist = Mathf.Lerp(currentDist, wantDist, 1f - Mathf.Exp(-8f * Time.deltaTime));
+        }
+        Vector3 dirToWant = toCamDist > 0.01f ? toCam.normalized : transform.forward;
+        transform.position = headPos + dirToWant * currentDist;
 
         if (shakeAmount > 0.01f)
         {
