@@ -578,11 +578,18 @@ public class VillageBuilder : MonoBehaviour
     }
 
     // Runs one build step; a failure is logged and the build continues.
+    // NOTE (ROUND 4 pop-in fix, 2026-11-09): do NOT add a
+    // "if (buildFinished) return;" guard here. FinishBuild() sets
+    // buildFinished=true FIRST and then wires the game through this very
+    // method (RunStep("SetupSystems", ...) / RunStep("SceneAmbience",
+    // ...)) — a guard here silently skips SetupSystems, so the game
+    // starts with no DayNightCycle, no GameManager and no monster knock
+    // (that is exactly what broke CI build 42602733035: FreezeFixTest +
+    // ScreenshotTest failed with "SetupSystems never ran"). The
+    // watchdog-tail closure lives in SafeStep + the yield-break checks
+    // between steps in BuildVillageAsync, which is where it belongs.
     private void RunStep(string name, System.Action step)
     {
-        // ROUND 4 (pop-in): same guard as SafeStep — never run a build
-        // step after the watchdog already finished the build.
-        if (buildFinished) return;
         try
         {
             step();
