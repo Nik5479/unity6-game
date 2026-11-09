@@ -3174,11 +3174,48 @@ public class VillageBuilder : MonoBehaviour
             // (the old fix) only changed its colour. Hide both meshes;
             // the avatar underneath (textured face / outfit top, hair,
             // body, footwear) renders normally without them.
-            MeshFilter mf = r.GetComponent<MeshFilter>();
-            if (mf != null && mf.sharedMesh != null && mf.sharedMesh.name.StartsWith("Cylinder_"))
+            // ROUND 5b FIX 1b: the first attempt matched on the mesh name
+            // (StartsWith "Cylinder_") and hid NOTHING — the CI log shows
+            // zero "cylinder hidden" lines and pujari.png still shows the
+            // capsule, so glTFast evidently renames runtime meshes (or
+            // the cylinders are skinned). Match on the MATERIAL names
+            // instead: Material.001 and Material.002 exist ONLY on the
+            // two cylinders (verified in the .glb), and material names
+            // are proven preserved at runtime (tractor / Bhumija / palm
+            // fixes all match on them). Mesh-name check stays as an OR.
+            // Diagnostic line per renderer so the CI log proves the
+            // runtime mesh/material names.
+            Mesh mesh = null;
+            if (r is SkinnedMeshRenderer smr) mesh = smr.sharedMesh;
+            else
+            {
+                MeshFilter mf = r.GetComponent<MeshFilter>();
+                if (mf != null) mesh = mf.sharedMesh;
+            }
+            {
+                System.Text.StringBuilder sb = new System.Text.StringBuilder();
+                sb.Append("[Village] Pujari renderer mesh=");
+                sb.Append(mesh != null ? mesh.name : "(none)");
+                sb.Append(" mats=");
+                foreach (Material mm in r.sharedMaterials) { if (mm != null) { sb.Append(mm.name); sb.Append(","); } }
+                Debug.Log(sb.ToString());
+            }
+            bool isCylinder = mesh != null && mesh.name.StartsWith("Cylinder_");
+            if (!isCylinder)
+            {
+                foreach (Material m in r.sharedMaterials)
+                {
+                    if (m != null && (m.name == "Material.001" || m.name == "Material.002"))
+                    {
+                        isCylinder = true;
+                        break;
+                    }
+                }
+            }
+            if (isCylinder)
             {
                 r.enabled = false;
-                Debug.Log("[Village] Pujari cylinder hidden: " + mf.sharedMesh.name);
+                Debug.Log("[Village] Pujari cylinder hidden: " + (mesh != null ? mesh.name : "?"));
                 continue;
             }
             foreach (Material m in r.sharedMaterials)
