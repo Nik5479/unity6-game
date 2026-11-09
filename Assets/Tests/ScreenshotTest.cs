@@ -118,6 +118,16 @@ public class ScreenshotTest
             Assert.IsNull(GameObject.Find(patchName),
                 "Ground patch object still present: " + patchName + " — Round 3 deleted all ground patches");
         }
+        // ROUND 4: the single-quad ground tiles are GONE too — SoilGround
+        // (8 m tan slab in front of the houses), SandstoneGround and
+        // ForestFloor were the same defect as the oval patches (a flat
+        // texture tile with a hard edge on top of the macro-textured
+        // ground plane).
+        foreach (string tileName in new string[] { "SoilGround", "SandstoneGround", "ForestFloor" })
+        {
+            Assert.IsNull(GameObject.Find(tileName),
+                "Ground tile still present: " + tileName + " — Round 4 deleted all single-quad ground tiles");
+        }
         int flatPatchMeshes = 0;
         foreach (Transform t in village.GetComponentsInChildren<Transform>(true))
         {

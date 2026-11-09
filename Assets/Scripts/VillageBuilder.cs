@@ -2546,7 +2546,8 @@ public class VillageBuilder : MonoBehaviour
         // from the wolf, 4.3 m from the chicken's new spot.
         yield return LoadProp("indian_terracotta_matka_red_clay_water_pot_40_ris7.glb", "Matka",
             new Vector3(-4.2f, 0f, 9.2f), 0f, 0.5f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None,
+            MuteMatka);
         // PHONE-VIDEO FIX 2026-11-09: was (7.5, 3.5) — INSIDE House_2
         // (11.5 m wide, x[3.22,14.78] z[2.23,13.77]). Now south of it.
         yield return LoadProp("rusty_and_oil_stained_oil_barrel_43_s99h.glb", "OilBarrel",
@@ -2945,6 +2946,39 @@ public class VillageBuilder : MonoBehaviour
         Debug.Log("[Village] Oil barrel muted");
     }
 
+    // ROUND 4 (ground): the Matka (red-clay water pot) renders bright
+    // saturated red-orange on the phone (frames 22s/25s) — its single
+    // material carries the red entirely in its base texture and no fix
+    // ever touched it. Mirrors MuteOilBarrel with the stronger
+    // terracotta multiplier (0.55/0.30/0.12, the values FixPujari uses
+    // for its orange pot) — the mild 0.78/0.74/0.68 of
+    // MuteOrangePlaster did NOT dent the red (R1b lesson). The pot's
+    // material is unique to this .glb, so mutating sharedMaterials is
+    // safe here (unlike the Dock fence, below).
+    private static void MuteMatka(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D normal = Tex("brown_mud_dry_nor_gl_1k");
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null) continue;
+                ToUrpLit(m);
+                Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : Color.white;
+                m.SetColor("_BaseColor", new Color(c.r * 0.55f, c.g * 0.30f, c.b * 0.12f, c.a));
+                m.SetFloat("_Smoothness", 0.5f);
+                if (normal != null)
+                {
+                    m.SetTexture("_BumpMap", normal);
+                    m.SetFloat("_BumpScale", 0.3f);
+                    m.EnableKeyword("_NORMALMAP");
+                }
+            }
+        }
+        Debug.Log("[Village] Matka muted to terracotta");
+    }
+
     // OVERNIGHT R1: Mukhiya (Meshy, 1 textured material) reads as a flat
     // white sheet at distance — the pale texture blows out in the day sun.
     // A mild warm tint + grain knocks the blow-out down. 0.88 is
@@ -3026,6 +3060,47 @@ public class VillageBuilder : MonoBehaviour
             }
         }
         Debug.Log("[Village] Bullock cart wood PBR applied to " + seen.Count + " materials");
+    }
+
+    // ROUND 4 (ground): the Dock's fence (FenceH/FenceV meshes) renders
+    // with bright-blue triangular patches on the phone (frames
+    // 10s/12s/15s). Both fence meshes share material VoodoHut_Stairs,
+    // whose authored texture atlas has a blue-painted region where the
+    // fence UVs land — a _BaseColor tint cannot fix a saturated texture
+    // (it only darkens the blue), the _BaseMap must be replaced. The
+    // material is ALSO used by the Dock's stairs and stilt bases, so it
+    // is CLONED per fence renderer (mutating sharedMaterials would
+    // re-texture the stairs too). Matched by renderer name, since the
+    // material name is shared.
+    private static void FixDockFence(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D albedo = Tex("bark_brown_02_diff_1k");
+        Texture2D normal = Tex("brown_mud_dry_nor_gl_1k");
+        Texture2D metalSmooth = Tex("brown_mud_dry_metal_smooth_1k");
+        int fixedCount = 0;
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            if (!r.gameObject.name.Contains("Fence")) continue;
+            Material[] shared = r.sharedMaterials;
+            Material[] cloned = new Material[shared.Length];
+            for (int i = 0; i < shared.Length; i++)
+            {
+                Material m = shared[i];
+                if (m == null) { cloned[i] = null; continue; }
+                Material c = new Material(m);
+                ToUrpLit(c);
+                if (albedo != null) c.SetTexture("_BaseMap", albedo);
+                c.SetColor("_BaseColor", Color.white);
+                if (normal != null) c.SetTexture("_BumpMap", normal);
+                c.SetFloat("_BumpScale", 0.6f);
+                if (metalSmooth != null) c.SetTexture("_MetallicGlossMap", metalSmooth);
+                cloned[i] = c;
+            }
+            r.materials = cloned;
+            fixedCount++;
+        }
+        Debug.Log("[Village] Dock fence re-textured (wood PBR, cloned materials) on " + fixedCount + " renderer(s)");
     }
 
     // Tractor: 12 flat-colour materials, zero textures. PBR per material
@@ -3324,18 +3399,18 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("historic_miscellaneous_stand_wood_old_05_xeokah0_mid_50_69zs.glb", "WoodStand",
             new Vector3(-5.5f, 0f, 3.5f), -20f, 1.1f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
-        // Ground surfaces: sandstone by the temple lane, soil north of the
-        // chowk, forest floor at the south jungle edge. Sandstone sits
-        // 0.15 m sunk so it reads as rocky ground, not a raised white slab.
-        yield return LoadProp("sandstone_rocky_ground_vd3oeic_mid_59_23jb.glb", "SandstoneGround",
-            new Vector3(-2f, -0.15f, -18f), 0f, 5f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
-        yield return LoadProp("SoilGround.glb", "SoilGround",
-            new Vector3(-4f, 0f, 12f), 0f, 8f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
-        yield return LoadProp("ForestFloor.glb", "ForestFloor",
-            new Vector3(6f, 0f, -18f), 0f, 6f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+        // ROUND 4 (ground): the three single-quad ground tiles are
+        // DELETED — SandstoneGround, SoilGround and ForestFloor were
+        // the same defect as the Round 3 oval patches: a flat texture
+        // tile (one 1024 KTX2 stretched over a 5-8 m quad) with a hard
+        // edge sitting on top of the macro-textured ground plane.
+        // SoilGround was the big smooth tan slab in front of the houses
+        // (phone frames 22s/25s/28s/30s). The ground underneath is
+        // already the Round 3 macro mud (wet lanes + cobble + blotches
+        // baked in, incl. spots at (-4, 12)), so deletion leaves
+        // textured ground, not a hole.
+        // (LoadProp calls removed — see git history for the originals.)
+
         // Shamshan (south-east corner): grave stone set + small grave.
         // Fix-push P2-17: moved 2 m east (17 -> 19 / 14.5 -> 16.5) so the
         // graves no longer overlap House_6's corner (~0.25 m before).
@@ -3386,7 +3461,8 @@ public class VillageBuilder : MonoBehaviour
         // slats (~21-24s in the phone video). Now a movement blocker.
         yield return LoadProp("dock_pier_78_n66e.glb", "Dock",
             new Vector3(-7f, 0f, 19f), 0f, 6f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
+            FixDockFence);
         // Lanterns: brass diya inside Nilesh's house, chowk lantern by the lamp.
         // Phase 1: the player's hut shrank to 4 m tall (z span 4.93-7.07),
         // so the house diya moved from z=4.5 to z=5.5 to stay inside it.
