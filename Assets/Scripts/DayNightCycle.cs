@@ -7,6 +7,12 @@ using UnityEngine;
 /// thick fog, dark ambient, chowk lamp flickers on, moon fades in.
 /// Dawn: dim grey morning, night ends (survived).
 /// Fires OnNightStart / OnDawn (wired by VillageBuilder).
+/// ROUND 4 (2026-11-09, look): the phone video was a flat bright
+/// midday with no mood — the user's reference is a golden dusk /
+/// moonlit night. Day is now a warm late afternoon (soft sun, light
+/// haze) and dusk arrives fast (20 s) and lasts (15 s) through an
+/// orange golden-hour stage; night fog is lighter and the lamps/moon
+/// are brighter. Day stays readable — never pitch dark.
 /// </summary>
 public class DayNightCycle : MonoBehaviour
 {
@@ -21,8 +27,12 @@ public class DayNightCycle : MonoBehaviour
     // by day and returns at night.
     public GameObject moonObject;
 
-    public float dayLength = 60f;
-    public float duskLength = 8f;
+    // ROUND 4: day is short (20 s) so the golden dusk arrives fast,
+    // and dusk is long (15 s) so the orange stage reads on screen.
+    // Night still starts ~35 s in — the day objective (well pickup)
+    // has time, and the monster still activates at night.
+    public float dayLength = 20f;
+    public float duskLength = 15f;
     public float nightLength = 75f;
 
     public bool IsNight { get; private set; }
@@ -41,9 +51,16 @@ public class DayNightCycle : MonoBehaviour
     private static readonly Color kNightSky = new Color(0.02f, 0.03f, 0.07f);
     private static readonly Color kDaySun = new Color(1f, 0.95f, 0.84f);
     private static readonly Color kNightMoon = new Color(0.55f, 0.65f, 0.92f);
+    // ROUND 4: golden-hour orange the dusk sun passes through on its
+    // way from warm day to cool blue night (was a straight day->blue
+    // lerp — no orange stage existed, so dusk read as grey-blue).
+    private static readonly Color kDuskSun = new Color(1f, 0.55f, 0.25f);
     private static readonly Color kDayFog = new Color(0.6f, 0.65f, 0.7f);
-    private static readonly Color kNightFog = new Color(0.05f, 0.06f, 0.11f);
-    private static readonly Color kDayAmbient = new Color(0.55f, 0.55f, 0.55f);
+    // ROUND 4: night fog lifted so the mist reads blue-grey, not black.
+    private static readonly Color kNightFog = new Color(0.08f, 0.09f, 0.14f);
+    // ROUND 4: day ambient slightly warm and a touch dimmer — the old
+    // flat 0.55 grey was part of the "flat bright day" look.
+    private static readonly Color kDayAmbient = new Color(0.52f, 0.50f, 0.46f);
     // Night must still READ (reference target: a moonlit village you can
     // see, not pitch black). Attempt-11 proved 0.22 ambient + 0.5
     // moonlight still leaves the ground near-black and the demon a
@@ -73,9 +90,9 @@ public class DayNightCycle : MonoBehaviour
             if (daySkybox.HasProperty("_SunDisk")) daySkybox.SetFloat("_SunDisk", 2f);
             if (daySkybox.HasProperty("_SunSize")) daySkybox.SetFloat("_SunSize", 0.035f);
             if (daySkybox.HasProperty("_AtmosphereThickness")) daySkybox.SetFloat("_AtmosphereThickness", 1.15f);
-            if (daySkybox.HasProperty("_SkyTint")) daySkybox.SetColor("_SkyTint", new Color(0.52f, 0.56f, 0.62f));
+            if (daySkybox.HasProperty("_SkyTint")) daySkybox.SetColor("_SkyTint", new Color(0.55f, 0.54f, 0.50f));
             if (daySkybox.HasProperty("_GroundColor")) daySkybox.SetColor("_GroundColor", new Color(0.42f, 0.38f, 0.33f));
-            if (daySkybox.HasProperty("_Exposure")) daySkybox.SetFloat("_Exposure", 1.2f);
+            if (daySkybox.HasProperty("_Exposure")) daySkybox.SetFloat("_Exposure", 1.0f);
         }
         else
         {
@@ -148,42 +165,55 @@ public class DayNightCycle : MonoBehaviour
         ApplyNight();
     }
 
+    // ROUND 4: jump to mid-dusk (used by the screenshot test for the
+    // dusk shot). Does NOT fire OnNightStart — dusk is not night yet.
+    public void SkipToDusk()
+    {
+        phase = 1;
+        t = duskLength * 0.5f;
+        ApplyBlend(0.5f);
+    }
+
     private void ApplyDay()
     {
-        // Phase 2 day target (2026-11-08): the day reference is bright
-        // sun, blue sky, hard light — the old sun 1.0 left the day flat
-        // and the puddles matte. Sun 1.3 + thinner day haze (0.0025);
-        // night/dusk values are untouched (full lighting pass is Phase 3).
-        SetSun(1.3f, kDaySun, 50f);
-        SetSky(kDaySky, kDayFog, 0.0025f, kDayAmbient);
+        // ROUND 4 (look): warm late afternoon instead of flat bright
+        // midday — softer sun (1.05, was 1.3) lower in the sky (35 deg,
+        // was 50) for longer shadows, and visible light haze (fog
+        // 0.006, was 0.0025). Still bright enough to read clearly.
+        SetSun(1.05f, kDaySun, 35f);
+        SetSky(kDaySky, kDayFog, 0.006f, kDayAmbient);
         SetLamp(0f);
         SetMoon(0f);
     }
 
     private void ApplyBlend(float k)
     {
-        // Lighting pass: moonlight bottoms out at 0.35 (was 0.25) so
-        // moonlit surfaces still read cool blue instead of pitch black.
-        // Fix pass: fog 0.022 -> 0.03 so the distant flat ground fades
-        // into the dark instead of reading as a flat brown plane.
-        SetSun(Mathf.Lerp(1f, 0.7f, k), Color.Lerp(kDaySun, kNightMoon, k), Mathf.Lerp(50f, 16f, k));
-        SetSky(Color.Lerp(kDaySky, kNightSky, k), Color.Lerp(kDayFog, kNightFog, k), Mathf.Lerp(0.004f, 0.03f, k), Color.Lerp(kDayAmbient, kNightAmbient, k));
+        // ROUND 4: golden-hour dusk. The sun cools through orange
+        // (kDuskSun at mid-blend) instead of straight day->blue, and
+        // the blend starts at the DAY sun (1.05, 35 deg) — the old
+        // blend started at 1.0/50 deg, a visible intensity step at
+        // t = dayLength. Fog stays light (0.018 at night, was 0.03).
+        Color sunColor = k < 0.5f
+            ? Color.Lerp(kDaySun, kDuskSun, k * 2f)
+            : Color.Lerp(kDuskSun, kNightMoon, (k - 0.5f) * 2f);
+        SetSun(Mathf.Lerp(1.05f, 0.7f, k), sunColor, Mathf.Lerp(35f, 16f, k));
+        SetSky(Color.Lerp(kDaySky, kNightSky, k), Color.Lerp(kDayFog, kNightFog, k), Mathf.Lerp(0.006f, 0.018f, k), Color.Lerp(kDayAmbient, kNightAmbient, k));
         SetLamp(k);
         SetMoon(k);
     }
 
     private void ApplyNight()
     {
-        // Lighting pass: stronger cool moonlight (0.35, was 0.25) + a
-        // touch more haze (0.022, was 0.018) for depth, like the
-        // reference's foggy night. Warm lamp light contrasts against it.
-        // Fix pass: moonlight 0.35 -> 0.5, fog 0.022 -> 0.03 — the
-        // night backgrounds were near pitch black.
+        // ROUND 4: lighter fog (0.018, was 0.03 — "light fog", not a
+        // whiteout) and a brighter lamp (flicker base 1.6, was 1.35)
+        // so the warm lamp vs cool moon contrast reads like the
+        // reference. Moonlight stays 0.5 and ambient 0.40 — the
+        // readability floor, do not go below.
         SetSun(0.5f, kNightMoon, 16f);
-        SetSky(kNightSky, kNightFog, 0.03f, kNightAmbient);
+        SetSky(kNightSky, kNightFog, 0.018f, kNightAmbient);
         // Lamp flickers: mostly on, occasional dips (horror feel).
         lampFlickerT += Time.deltaTime;
-        float flicker = 1.35f;
+        float flicker = 1.6f;
         float n = Mathf.PerlinNoise(lampFlickerT * 7f, 0f);
         if (n < 0.18f)
         {
@@ -253,7 +283,9 @@ public class DayNightCycle : MonoBehaviour
             // so the night reads dark blue with stars, like the
             // reference. (Day uses the procedural skybox branch above,
             // so this only touches dusk/night.)
-            skybox.SetFloat("_Exposure", 0.8f + Mathf.Clamp01(lum / 0.8f) * 1.1f);
+            // ROUND 4: base 0.8 -> 1.0 so the HDRI stars read brighter
+            // at night (still dark blue, not blown out).
+            skybox.SetFloat("_Exposure", 1.0f + Mathf.Clamp01(lum / 0.8f) * 1.1f);
         }
     }
 
@@ -273,9 +305,10 @@ public class DayNightCycle : MonoBehaviour
     {
         if (moonMaterial != null)
         {
-            // Lighting pass: brighter moon disc at night (was ~1.35) so it
-            // reads as the big full moon in the reference, not a dim ball.
-            moonMaterial.SetColor("_EmissionColor", new Color(0.5f + 1.5f * k, 0.5f + 1.5f * k, 0.55f + 1.6f * k));
+            // ROUND 4: brighter moon disc at night (emission 2.0/2.1,
+            // was 1.5/1.6) so it reads as the big full moon in the
+            // reference, not a dim ball.
+            moonMaterial.SetColor("_EmissionColor", new Color(0.5f + 2.0f * k, 0.5f + 2.0f * k, 0.55f + 2.1f * k));
             // Fix pass: the moon is URP/Unlit now (the Lit+emission-map
             // disc rendered dark). Unlit brightness is the base colour.
             if (moonMaterial.shader != null && moonMaterial.shader.name.Contains("Unlit"))

@@ -405,6 +405,18 @@ public class ScreenshotTest
         Assert.IsNotNull(shot9, "Screenshot 9 (Nilesh face) failed to render");
         Assert.IsTrue(File.Exists(shot9), "Screenshot 9 file missing: " + shot9);
 
+        // ROUND 4 (look): dusk shot — the golden-hour look is the whole
+        // point of this round, so prove it: drive the cycle to mid-dusk
+        // and shoot from the gameplay camera. The sun must read orange
+        // (not flat white) and the lamp glow must be on.
+        Component duskCycle = FindComponent("DayNightCycle");
+        Assert.IsNotNull(duskCycle, "DayNightCycle not found for dusk shot");
+        duskCycle.GetType().GetMethod("SkipToDusk").Invoke(duskCycle, null);
+        yield return new WaitForSeconds(2f);
+        string shot10 = RenderScreenshot(cam, "main-scene-dusk.png", 1280, 720);
+        Assert.IsNotNull(shot10, "Screenshot 10 (dusk) failed to render");
+        Assert.IsTrue(File.Exists(shot10), "Screenshot 10 (dusk) file missing: " + shot10);
+
         // PILOT night shots: the reference images are NIGHT scenes and
         // every screenshot so far was DAY. Drive the cycle to night and
         // shoot the pilot from the gameplay camera (lamp + wet road) and
@@ -434,7 +446,7 @@ public class ScreenshotTest
         Assert.IsNotNull(shot4, "Night angle-2 screenshot failed to render");
         Assert.IsTrue(File.Exists(shot4), "Night angle-2 screenshot file missing: " + shot4);
 
-        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot3 + " | " + shot4);
+        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot10 + " | " + shot3 + " | " + shot4);
         yield return null;
     }
 
