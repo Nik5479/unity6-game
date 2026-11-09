@@ -2479,7 +2479,7 @@ public class VillageBuilder : MonoBehaviour
         // the dock's edge. All three move clear; the mango + banyan +
         // chinaberry leaf meshes were also restored from the original
         // files this pass (their canopies were decimated 87-94%).
-        GameObject mango = null, banyan = null, palm = null;
+        GameObject mango = null, banyan = null; // ROUND 5b: palm var dropped (hero + ring palms removed).
         yield return LoadRealTree("mango_tree_3_sl11.glb", "Tree_Mango",
             new Vector3(-18f, 0f, -5f), 9f, GltfModelLoader.ColliderMode.Trunk, g => mango = g);
         // Replacement 2026-11-07: Chinese Banyan, 111k tris with real
