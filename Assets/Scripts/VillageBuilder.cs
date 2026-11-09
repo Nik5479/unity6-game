@@ -659,7 +659,16 @@ public class VillageBuilder : MonoBehaviour
             dimRT.anchorMax = Vector2.one;
             dimRT.sizeDelta = Vector2.zero;
             Image dimImg = dimGO.AddComponent<Image>();
-            dimImg.color = new Color(0f, 0f, 0f, 0.72f);
+            // ROUND 5 (final chance): the dim was 0.72 alpha, so the
+            // player WATCHED the village assemble — empty mud plain,
+            // fallback blocky Nilesh, houses popping in one by one — on
+            // every launch AND every DOBARA KHELO reload (the user's
+            // v1.0.6 video proves it: "Gaon ban raha hai..." over an empty
+            // plain at 1 s, houses appearing at 2-5 s). A loading screen
+            // that shows the build is not a loading screen. Fully opaque
+            // now: the player sees only "Gaon ban raha hai..." + progress
+            // until FinishBuild opens the gate with the complete village.
+            dimImg.color = new Color(0f, 0f, 0f, 1f);
             GameObject loadGO = new GameObject("LoadingText");
             RectTransform loadRT = loadGO.AddComponent<RectTransform>();
             loadRT.SetParent(dimGO.transform, false);
@@ -2597,6 +2606,15 @@ public class VillageBuilder : MonoBehaviour
         float s = 0.9f + (index % 3) * 0.12f;
         c.transform.localScale = src.transform.localScale * s;
         c.SetActive(true);
+        // ROUND 5 (lag): ring trees are distant far-variants — rendering
+        // each one into the shadow map costs a draw call for almost no
+        // visible gain (their shadows fall outside the play area). Shadow
+        // casting stays ON for the hero trees, houses and props inside
+        // the village. This is per-RENDERER, so the shared materials and
+        // GPU instancing are untouched. (No LODGroup here — Round 4
+        // proved a culling LOD makes ring trees wink in/out.)
+        foreach (Renderer r in c.GetComponentsInChildren<Renderer>())
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         // ROUND 4 (pop-in): NO LODGroup here. A single LOD at 0.025
         // culls the whole tree when it covers < 2.5% of the screen, so
         // ring trees winked in/out as the camera panned — the "village
@@ -4090,7 +4108,14 @@ public class VillageBuilder : MonoBehaviour
         try
         {
             QualitySettings.shadows = ShadowQuality.All;
-            QualitySettings.shadowDistance = 45f;
+            // ROUND 5 (lag): shadow distance 45 -> 30 m. The shadow map
+            // covers a 45 m radius today — nearly every object in the
+            // village renders into it a second time, which is the
+            // predictable cause of the walking lag on the phone (draw
+            // calls, not triangles: ~0.62M tris is fine for the GPU).
+            // 30 m still covers the player's surroundings; shadows past
+            // that range simply stop instead of costing a second render.
+            QualitySettings.shadowDistance = 30f;
         }
         catch (System.Exception e)
         {
@@ -4130,7 +4155,10 @@ public class VillageBuilder : MonoBehaviour
             probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
             probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.ViaScripting;
             probe.size = new Vector3(55f, 30f, 55f);
-            probe.resolution = 128;
+            // ROUND 5 (lag): 128 -> 64 cubemap. One-time build cost, but
+            // the probe renders the whole village six times — 64 is
+            // plenty for PBR reflections on a phone.
+            probe.resolution = 64;
             probe.nearClipPlane = 0.3f;
             probe.farClipPlane = 120f;
             probe.RenderProbe();
