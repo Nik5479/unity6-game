@@ -186,6 +186,7 @@ public class VillageBuilder : MonoBehaviour
     private Material matPlaster;
     private Material matPlaster2;
     private Material matWood;
+    private Material matCrate; // ROUND 5b: warm-brown crate body (wood_planks.jpg is grey).
     private Material matRoof;
     private Material matStone;
     private Material matGrass;
@@ -1060,6 +1061,7 @@ public class VillageBuilder : MonoBehaviour
 
         matPlaster2 = MakeMat("WallPlaster2", LoadTex("wall_plaster"), new Color(0.85f, 0.76f, 0.62f), 0.15f, new Vector2(2f, 1.5f));
         matDark = MakeFlat("MonsterDark", new Color(0.02f, 0.02f, 0.025f), 0.0f);
+        matCrate = MakeFlat("CrateWood", new Color(0.42f, 0.28f, 0.15f), 0.5f);
         matGlass = MakeFlat("WindowGlass", new Color(0.03f, 0.04f, 0.07f), 0.6f);
         matSkin = MakeFlat("Skin", new Color(0.45f, 0.30f, 0.20f), 0.4f);
         matKurtaCream = MakeFlat("KurtaCream", new Color(0.88f, 0.82f, 0.68f), 0.5f);
@@ -2363,10 +2365,7 @@ public class VillageBuilder : MonoBehaviour
         }
 
         // Food pickup (crate) next to the well.
-        GameObject crate = Box("Pickup_Food", wellPos + new Vector3(1.9f, 0.3f, 1.2f), new Vector3(0.65f, 0.6f, 0.65f), matWood, villageRoot);
-        foodPickup = crate.AddComponent<Pickup>();
-        foodPickup.itemName = "Khana";
-        foodPickup.bobHeight = 0.12f;
+        foodPickup = MakePickup("Pickup_Food", wellPos + new Vector3(1.9f, 0.3f, 1.2f), "Khana", new Vector3(0.65f, 0.6f, 0.65f));
 
         // Fix-push P2-18b: 3 more pickups, same Pickup system as the food
         // crate — water by the handpump, medicine inside Nilesh's house,
@@ -2776,10 +2775,29 @@ public class VillageBuilder : MonoBehaviour
     }
 
     // Fix-push P2-18b: a pickup crate like the food one (Box + Pickup).
-    private Pickup MakePickup(string name, Vector3 pos, string itemName)
+    // ROUND 5b: the old pickup was a bare cube in matWood — and the
+    // wood_planks texture itself is GREY (avg RGB 107,100,90), so the
+    // crates read as flat grey placeholder cubes in the middle of the
+    // path. Now a real supply crate: warm-brown body + a coloured lid
+    // per item (Battery yellow, Paani blue, Dawai white, Khana green),
+    // built on a root so the Pickup bob/rotate moves the whole assembly.
+    // Collection is distance-based (GameManager.TryCollectPickup, 2.8 m),
+    // so the Pickup living on the root is safe.
+    private Pickup MakePickup(string name, Vector3 pos, string itemName, Vector3 size = default(Vector3))
     {
-        GameObject crate = Box(name, pos, new Vector3(0.55f, 0.5f, 0.55f), matWood, villageRoot);
-        Pickup p = crate.AddComponent<Pickup>();
+        if (size == Vector3.zero) size = new Vector3(0.55f, 0.5f, 0.55f);
+        GameObject root = new GameObject(name);
+        root.transform.SetParent(villageRoot, false);
+        root.transform.position = pos;
+        Box(name + "_Body", pos, size, matCrate, root.transform);
+        Color lidColor = new Color(0.25f, 0.6f, 0.25f); // Khana green
+        if (itemName == "Battery") lidColor = new Color(0.9f, 0.75f, 0.1f);
+        else if (itemName == "Paani") lidColor = new Color(0.15f, 0.45f, 0.8f);
+        else if (itemName == "Dawai") lidColor = new Color(0.9f, 0.9f, 0.9f);
+        Material lidMat = MakeFlat("Lid_" + itemName, lidColor, 0.4f);
+        Vector3 lidSize = new Vector3(size.x * 0.78f, 0.08f, size.z * 0.78f);
+        Box(name + "_Lid", pos + new Vector3(0f, size.y / 2f + lidSize.y / 2f, 0f), lidSize, lidMat, root.transform);
+        Pickup p = root.AddComponent<Pickup>();
         p.itemName = itemName;
         p.bobHeight = 0.12f;
         return p;
