@@ -75,19 +75,15 @@ public class PlayerSpeedTest
         float h = Vector3.Dot(want, right);
         float v = Vector3.Dot(want, fwd);
 
-        // Walk: half stick (mag 0.4), no run. Target = 1.4 * (0.4/0.5) = 1.12.
-        yield return MeasureRoutine(pc, moveField, runField, speedProp,
-            new Vector2(h * 0.4f, v * 0.4f), false, 2.5f);
-        Debug.Log("[PlayerSpeedTest] Walk mean speed: " + m_mean.ToString("F2") + " m/s (expect ~1.12)");
-        Assert.GreaterOrEqual(m_mean, 0.8f, "Walk too slow (" + m_mean.ToString("F2") + " m/s, expect ~1.12)");
-        Assert.LessOrEqual(m_mean, 1.5f, "Walk too fast (" + m_mean.ToString("F2") + " m/s, expect ~1.12)");
-
-        // Jog: full stick, no run. Target = Lerp(1.4, 2.5, 1.0) = 2.5.
-        yield return MeasureRoutine(pc, moveField, runField, speedProp,
-            new Vector2(h, v), false, 2.5f);
-        Debug.Log("[PlayerSpeedTest] Jog mean speed: " + m_mean.ToString("F2") + " m/s (expect ~2.5)");
-        Assert.GreaterOrEqual(m_mean, 2.1f, "Jog too slow (" + m_mean.ToString("F2") + " m/s, expect ~2.5)");
-        Assert.LessOrEqual(m_mean, 2.9f, "Jog too fast (" + m_mean.ToString("F2") + " m/s, expect ~2.5)");
+        // Phase order matters: RUN FIRST. The north lane from spawn ends
+        // at a collider ~15 m out (build 42621705733: walk+jog first ate
+        // the clear lane, so the run phase could only move 2.53 m before
+        // the player was blocked and the displacement assert failed —
+        // even though the run speed itself was a correct 4.00 m/s).
+        // Running first measures the displacement on the fresh, clear
+        // lane from spawn (~8.4 m in 2.5 s). Jog/walk follow and assert
+        // only the commanded speed (CurrentSpeed is input-driven, so a
+        // wall does not change the reading).
 
         // Run: full stick + RUN held. Target = Lerp(2.5, 4.0, 1.0) = 4.0.
         // The user's bar is "fast speed na ho": Run must be ~4.0, never 5.81.
@@ -101,12 +97,26 @@ public class PlayerSpeedTest
             new Vector3(runStart.x, 0f, runStart.z));
         Debug.Log("[PlayerSpeedTest] Run mean speed: " + runMean.ToString("F2")
             + " m/s, max: " + runMax.ToString("F2")
-            + " m/s, displacement in 2.5 s: " + runDisp.ToString("F2") + " m (expect ~4.0 / ~10 m)");
+            + " m/s, displacement in 2.5 s: " + runDisp.ToString("F2") + " m (expect ~4.0 / ~8.4 m)");
         Assert.GreaterOrEqual(runMean, 3.5f, "Run too slow (" + runMean.ToString("F2") + " m/s, expect ~4.0)");
         Assert.LessOrEqual(runMean, 4.5f, "Run too fast (" + runMean.ToString("F2") + " m/s — user ordered no fast speed, expect ~4.0)");
         Assert.LessOrEqual(runMax, 4.6f, "Run peaked at " + runMax.ToString("F2") + " m/s — exceeds the 4.0 m/s approved speed");
         Assert.GreaterOrEqual(runDisp, 4f, "Run displacement only " + runDisp.ToString("F2")
             + " m in 2.5 s — the player is not actually moving at run speed (blocked?)");
+
+        // Jog: full stick, no run. Target = Lerp(1.4, 2.5, 1.0) = 2.5.
+        yield return MeasureRoutine(pc, moveField, runField, speedProp,
+            new Vector2(h, v), false, 2.5f);
+        Debug.Log("[PlayerSpeedTest] Jog mean speed: " + m_mean.ToString("F2") + " m/s (expect ~2.5)");
+        Assert.GreaterOrEqual(m_mean, 2.1f, "Jog too slow (" + m_mean.ToString("F2") + " m/s, expect ~2.5)");
+        Assert.LessOrEqual(m_mean, 2.9f, "Jog too fast (" + m_mean.ToString("F2") + " m/s, expect ~2.5)");
+
+        // Walk: half stick (mag 0.4), no run. Target = 1.4 * (0.4/0.5) = 1.12.
+        yield return MeasureRoutine(pc, moveField, runField, speedProp,
+            new Vector2(h * 0.4f, v * 0.4f), false, 2.5f);
+        Debug.Log("[PlayerSpeedTest] Walk mean speed: " + m_mean.ToString("F2") + " m/s (expect ~1.12)");
+        Assert.GreaterOrEqual(m_mean, 0.8f, "Walk too slow (" + m_mean.ToString("F2") + " m/s, expect ~1.12)");
+        Assert.LessOrEqual(m_mean, 1.5f, "Walk too fast (" + m_mean.ToString("F2") + " m/s, expect ~1.12)");
 
         // Stop the player so later tests start clean.
         moveField.SetValue(pc, Vector2.zero);
