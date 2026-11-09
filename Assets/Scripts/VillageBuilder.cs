@@ -2956,6 +2956,56 @@ public class VillageBuilder : MonoBehaviour
         Debug.Log("[Village] Stilt house fix applied to " + holder.name + " (" + fixedCount + " material(s))");
     }
 
+    // ROUND 5 (final chance): the Bhumija shrine (AngkorTemple, NE jungle
+    // edge, (21, 12)) renders as a bright silver-white jagged spire on
+    // the phone AND in CI (village-east.png) — its single albedo-only
+    // KTX2 texture is pale stone with no PBR response, so the day sun
+    // blows it out to silver and it reads as a glitch, not a temple.
+    // Same treatment as the stilt house: URP Lit + warm stone dim +
+    // fine-grain normal, so it reads as old stone. If the CI shot still
+    // shows it silver, the model must be REMOVED, not re-tinted again.
+    private static void FixBhumija(GameObject holder)
+    {
+        if (holder == null) return;
+        Texture2D normal = Tex("brown_mud_dry_nor_gl_1k");
+        Texture2D metalSmooth = Tex("brown_mud_dry_metal_smooth_1k");
+        System.Collections.Generic.HashSet<Material> seen =
+            new System.Collections.Generic.HashSet<Material>();
+        int fixedCount = 0;
+        foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
+        {
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m == null || !seen.Add(m)) continue;
+                ToUrpLit(m);
+                m.SetFloat("_Metallic", 0f);
+                m.SetFloat("_Smoothness", 0.6f);
+                // Warm stone dim: the pale albedo blows out to silver-white
+                // in the day sun. 0.62/0.58/0.52 keeps the carving readable
+                // instead of a silver spike.
+                Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : Color.white;
+                m.SetColor("_BaseColor", new Color(c.r * 0.62f, c.g * 0.58f, c.b * 0.52f, c.a));
+                if (normal != null && (!m.HasProperty("_BumpMap") || m.GetTexture("_BumpMap") == null))
+                {
+                    m.SetTexture("_BumpMap", normal);
+                    m.SetFloat("_BumpScale", 0.3f);
+                    m.EnableKeyword("_NORMALMAP");
+                }
+                if (metalSmooth != null && (!m.HasProperty("_MetallicGlossMap") || m.GetTexture("_MetallicGlossMap") == null))
+                {
+                    m.SetTexture("_MetallicGlossMap", metalSmooth);
+                    m.SetFloat("_Smoothness", 1f);
+                    m.SetFloat("_SmoothnessTextureChannel", 0f);
+                    m.EnableKeyword("_METALLICSPECGLOSSMAP");
+                }
+                Debug.Log("[Village] Bhumija material: " + m.name + " baseMap=" + (m.mainTexture != null)
+                    + " baseColor=" + m.GetColor("_BaseColor").ToString("F2"));
+                fixedCount++;
+            }
+        }
+        Debug.Log("[Village] Bhumija stone fix applied to " + holder.name + " (" + fixedCount + " material(s))");
+    }
+
     // PHONE-VIDEO 2026-11-09 (fix #7): palm fronds and trunk render
     // dark/black on the phone while the CI render shows them green and
     // textured (size-palm.png). The R3c CI diag proves the materials are
@@ -3279,6 +3329,18 @@ public class VillageBuilder : MonoBehaviour
                         smooth = 0.95f; bump = 0f; break;
                     case "HoodTexture":
                     case "WheelBlue":
+                        // ROUND 5 (final chance): ROOT CAUSE of "the fix
+                        // did not take" — the old code only added PBR
+                        // response and KEPT the authored flat colours, and
+                        // the authored colours ARE the defect: HoodTexture
+                        // [0.012, 0.105, 0.549] and WheelBlue
+                        // [0.031, 0.119, 0.411] are saturated blue
+                        // (verified in the .glb). On the phone that reads
+                        // as a flat bright-blue toy tractor. The blue is
+                        // replaced with a muted Mahindra red, rough
+                        // painted metal. WheelWhite stays white.
+                        m.SetColor("_BaseColor", new Color(0.42f, 0.10f, 0.08f));
+                        smooth = 0.35f; bump = 0.25f; break;
                     case "WheelWhite":
                         smooth = 0.55f; bump = 0.25f; break;  // painted metal
                     case "TurnSignal":
@@ -3299,6 +3361,11 @@ public class VillageBuilder : MonoBehaviour
                 }
                 m.SetFloat("_Metallic", metallic);
                 m.SetFloat("_Smoothness", smooth);
+                // ROUND 5: log the resulting colour per material, so the
+                // CI log proves the blue is gone (the old fix logged only
+                // a count, which is why the blue survived unnoticed).
+                Debug.Log("[Village] Tractor material: " + name + " baseColor="
+                    + (m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor").ToString("F2") : "(none)"));
             }
         }
         Debug.Log("[Village] Tractor PBR applied to " + seen.Count + " materials");
@@ -3589,7 +3656,8 @@ public class VillageBuilder : MonoBehaviour
         // Temple stays on disk as backup only — do NOT place it.)
         yield return LoadProp("Bhumija.glb", "AngkorTemple",
             new Vector3(21f, 0f, 12f), -90f, 9f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds,
+            FixBhumija);
         // Follow-up 2026-11-07: Abandoned hospital building (54,041 tris,
         // 21 meshes, 11 materials, ALL full PBR) replaces the decimated
         // kralls clinic (149,968 tris, 724 meshes / 60 materials) — same
