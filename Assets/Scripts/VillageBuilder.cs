@@ -177,6 +177,8 @@ public class VillageBuilder : MonoBehaviour
     public Material moonMaterial;
     public GameObject lampGlow;
     public GameObject moonGlow;
+    // ROUND 4 DOOR: persistent marker glow over the player's house.
+    public GameObject houseMarkerGlow;
     // OVERNIGHT R1: the moon sphere itself (hidden by day, see DayNightCycle.moonObject).
     public GameObject moonGO;
 
@@ -239,6 +241,11 @@ public class VillageBuilder : MonoBehaviour
     // Bed spot inside Nilesh's house (set while building the house, so the
     // real hospital-bed model lands exactly where the primitive bed was).
     private Vector3 playerBedPos = new Vector3(-11f, 0f, 4.3f);
+    // ROUND 4 DOOR: the player's hut footprint (world bounds, measured
+    // while building the house) — dawn survival uses these half extents,
+    // not the old hardcoded ±3.5/±3.0. Default = the old values, so a
+    // house that never builds still leaves a sane check.
+    private Bounds playerHouseBounds = new Bounds(new Vector3(-9f, 0f, 6f), new Vector3(7f, 4f, 6f));
 
     // FREEZE FIX 2026-11-08: the village build is ~50 sequential glTF
     // loads. Editor: ~22 s. A budget phone (4 GB RAM, slow flash):
@@ -763,6 +770,10 @@ public class VillageBuilder : MonoBehaviour
             if (moonGlow != null)
             {
                 moonGlow.transform.LookAt(mainCam.transform.position);
+            }
+            if (houseMarkerGlow != null)
+            {
+                houseMarkerGlow.transform.LookAt(mainCam.transform.position);
             }
         }
     }
@@ -1953,16 +1964,89 @@ public class VillageBuilder : MonoBehaviour
             // a real PBR re-texture — see WeatherHutPlaster.
             WeatherHutPlaster(hut);
             Bounds hb = GetWorldBounds(hut);
-            float w = hb.size.x;
-            float d = hb.size.z;
-            float doorX = hb.max.x - playerCenter.x;
-            BuildDoor(hut.transform, playerCenter, doorX, DoorSide.East, 1.2f, 2.1f);
-            BuildHouseInterior(hut.transform, playerCenter, w, d);
-            RegisterHouseDoorGap(hb, DoorSide.East, 1.2f, 2.1f);
+            // ROUND 4 DOOR: the WALL bounds, not the whole-hut bounds.
+            // hb includes the thatch roof, which overhangs the walls by
+            // ~0.44 m (wall max-X 4.359 vs roof max-X 4.661 in the .glb) —
+            // anchoring the door at hb.max.x stood the panel ~0.44 m proud
+            // of the wall face (phone frames 18s/22s) and put the collision
+            // walls 0.44 m outside the visual walls (invisible wall). The
+            // walls are the Material.002 renderers (same filter
+            // WeatherHutPlaster uses). Falls back to hb if the filter
+            // finds nothing, so a model change can never break the door.
+            Bounds wb = GetWorldBoundsForMaterial(hut, "Material.002");
+            if (wb.size.x < 1f || wb.size.z < 1f)
+            {
+                Debug.LogWarning("[Village] Wall bounds degenerate — falling back to whole-hut bounds for the door");
+                wb = hb;
+            }
+            playerHouseBounds = wb;
+            float w = wb.size.x;
+            float d = wb.size.z;
+            float doorX = wb.max.x - playerCenter.x;
+            // ROUND 4 DOOR: doorW 1.2 -> 1.5 m (passable band 0.3 -> 0.6 m
+            // with the 0.45 m player radius), and the door + interior are
+            // parented to villageRoot (scale 1) — NOT hut.transform. The
+            // hut holder is scaled ~1.46x by Normalize, so a door parented
+            // to it rendered as a 1.8 x 3.1 m slab (phone frames 18s/22s).
+            BuildDoor(villageRoot, playerCenter, doorX, DoorSide.East, 1.5f, 2.1f);
+            BuildHouseInterior(villageRoot, playerCenter, w, d);
+            RegisterHouseDoorGap(wb, DoorSide.East, 1.5f, 2.1f);
+            // ROUND 4 DOOR: the real hut has no door frame (the primitive
+            // house gets one) — add the same wood posts + lintel so the
+            // doorway reads as a doorway, not a slab on a solid wall.
+            // Frame sits proud of the WALL face (wb.max.x + 0.22), same
+            // offset as the primitive house.
+            float frameX = wb.max.x + 0.22f;
+            Box("House_Player_DoorFrameL", new Vector3(frameX, 2.1f / 2f, 6f + 1.5f / 2f + 0.09f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
+            Box("House_Player_DoorFrameR", new Vector3(frameX, 2.1f / 2f, 6f - 1.5f / 2f - 0.09f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
+            Box("House_Player_DoorFrameTop", new Vector3(frameX, 2.1f + 0.09f, 6f), new Vector3(0.18f, 0.18f, 1.5f + 0.36f), matWood, villageRoot);
+            // ROUND 4 DOOR: dark doorway behind the panel. Whether the
+            // Sketchfab wall has a real hole is unverified from the mesh
+            // data — this single-sided near-black quad (visible ONLY
+            // while the door is open, toggled by DoorController) guarantees
+            // an open door reveals darkness, not wall texture, and the
+            // player walks through darkness into the interior. Single-
+            // sided (faces east) so it never blocks the view OUT from
+            // inside. Hidden while closed, so the wooden panel shows.
+            if (matDark != null)
+            {
+                GameObject darkQuad = new GameObject("House_Player_DoorwayDark");
+                darkQuad.transform.SetParent(villageRoot, false);
+                darkQuad.transform.position = new Vector3(wb.max.x + 0.03f, 1.05f, 6f);
+                darkQuad.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+                darkQuad.transform.localScale = new Vector3(1.5f, 2.1f, 1f);
+                MeshRenderer dqR = darkQuad.AddComponent<MeshRenderer>();
+                MeshFilter dqF = darkQuad.AddComponent<MeshFilter>();
+                dqF.mesh = BuildQuadMesh();
+                dqR.material = matDark;
+                darkQuad.SetActive(false);
+                if (playerDoor != null) playerDoor.doorwayDark = darkQuad;
+            }
+            // ROUND 4 DOOR: the real hut has no floor and no interior
+            // light (BuildHouseInterior adds only table/pot/diya). Thin
+            // stone slab so the interior reads as a room, not dirt, +
+            // a dim warm diya light above the diya.
+            Box("House_Player_Floor", playerCenter + new Vector3(0f, 0f, 0f), new Vector3(w, 0.06f, d), matStone, villageRoot);
+            GameObject diyaLightGO = new GameObject("House_Player_DiyaLight");
+            diyaLightGO.transform.SetParent(villageRoot, false);
+            diyaLightGO.transform.position = playerCenter + new Vector3(0f, 1.2f, -d / 2f + 0.5f);
+            Light diyaLight = diyaLightGO.AddComponent<Light>();
+            diyaLight.type = LightType.Point;
+            diyaLight.color = new Color(1f, 0.6f, 0.25f);
+            diyaLight.intensity = 0.7f;
+            diyaLight.range = 5f;
+            // ROUND 4 DOOR: persistent marker over the player's house —
+            // a warm amber glow above the roof peak, so the player can
+            // tell WHICH house is his (phone video: he tried the stilt
+            // house, which has no door). Billboarded in Update.
+            houseMarkerGlow = MakeGlowQuad("House_Player_Marker",
+                new Vector3(hb.center.x, hb.max.y + 0.8f, hb.center.z), 1.6f,
+                new Color(1f, 0.65f, 0.15f, 0.55f));
         }
         else
         {
             BuildHouse("House_Player", playerCenter, 6f, 5f, 3f, DoorSide.East, true, false);
+            playerHouseBounds = new Bounds(playerCenter, new Vector3(6f, 4f, 5f));
         }
 
         // Houses 2-6: one different real model each.
@@ -2037,6 +2121,29 @@ public class VillageBuilder : MonoBehaviour
         foreach (Renderer r in renderers)
         {
             b.Encapsulate(r.bounds);
+        }
+        return b;
+    }
+
+    // World-space bounds of the renderers under a model that use one
+    // material (by name). ROUND 4 DOOR: the player's hut WALLS are
+    // Material.002; the whole-hut bounds include the thatch roof, which
+    // overhangs the walls by ~0.44 m. Returns an empty (zero-size) bounds
+    // if no renderer uses the material — the caller falls back to hb.
+    private static Bounds GetWorldBoundsForMaterial(GameObject root, string matName)
+    {
+        Bounds b = new Bounds();
+        bool any = false;
+        foreach (Renderer r in root.GetComponentsInChildren<Renderer>())
+        {
+            bool hit = false;
+            foreach (Material m in r.sharedMaterials)
+            {
+                if (m != null && m.name == matName) { hit = true; break; }
+            }
+            if (!hit) continue;
+            if (!any) { b = r.bounds; any = true; }
+            else b.Encapsulate(r.bounds);
         }
         return b;
     }
@@ -3721,6 +3828,11 @@ public class VillageBuilder : MonoBehaviour
         GameManager gm = gameObject.AddComponent<GameManager>();
         gm.player = pc;
         gm.playerDoor = playerDoor;
+        // ROUND 4 DOOR: dawn survival uses the ACTUAL hut footprint, not
+        // the old hardcoded ±3.5/±3.0 — a player standing inside near the
+        // walls counted as outside at dawn.
+        GameManager.PlayerHouseHalfExtents = new Vector3(
+            playerHouseBounds.size.x / 2f, 0f, playerHouseBounds.size.z / 2f);
         gm.dayNight = cycle;
         gm.monster = knock;
         gm.torch = torch;

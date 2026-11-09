@@ -26,9 +26,16 @@ public class MobileControls : MonoBehaviour
     private Button restartButton;
     private Button torchButton;
     private Button lockButton;
+    private Button actionButton;
     private float subtitleUntil;
     private string subtitleQueued;
     private float subtitleQueuedUntil;
+    // ROUND 4 DOOR: proximity prompt for the house door (there was NO
+    // prompt at all — the player never learned the hand button opens
+    // the door). DoorPromptActive is the test-visible state.
+    private bool doorPromptShown;
+    private SpriteRenderer doorPromptIcon;
+    public bool DoorPromptActive { get; private set; }
 
     private static readonly Color kBtnColor = new Color(0.12f, 0.12f, 0.16f, 0.62f);
     private static readonly Color kBtnOnColor = new Color(0.85f, 0.55f, 0.15f, 0.85f);
@@ -161,6 +168,89 @@ public class MobileControls : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.L) && gameManager != null)
         {
             gameManager.ToggleLock();
+        }
+        // ROUND 4 DOOR: proximity prompt for the house door.
+        UpdateDoorPrompt();
+    }
+
+    // ROUND 4 DOOR: when the player is near his closed, unlocked door,
+    // the ACTION (hand) button pulses amber + grows, a floating hand
+    // icon appears above the door, and (once) a subtitle tells him what
+    // to press. Icon-first, per the icon-only controls rule — no words
+    // on the button itself.
+    private void UpdateDoorPrompt()
+    {
+        if (gameManager == null || gameManager.playerDoor == null || player == null)
+        {
+            SetActionPrompt(false);
+            if (doorPromptIcon != null) doorPromptIcon.gameObject.SetActive(false);
+            DoorPromptActive = false;
+            return;
+        }
+        DoorController dc = gameManager.playerDoor;
+        Vector3 dp = dc.DoorCenter;
+        Vector3 pp = player.transform.position;
+        float dx = pp.x - dp.x;
+        float dz = pp.z - dp.z;
+        float distXZ = Mathf.Sqrt(dx * dx + dz * dz);
+        bool inRange = distXZ < 3.5f;
+        bool prompt = inRange && !dc.IsOpen && !dc.IsLocked;
+        DoorPromptActive = prompt;
+        SetActionPrompt(prompt);
+        if (prompt)
+        {
+            EnsureDoorPromptIcon(dp);
+            if (doorPromptIcon != null)
+            {
+                doorPromptIcon.gameObject.SetActive(true);
+                Camera cam = Camera.main;
+                if (cam != null)
+                {
+                    doorPromptIcon.transform.LookAt(cam.transform.position);
+                }
+            }
+            if (!doorPromptShown)
+            {
+                doorPromptShown = true;
+                gameManager.ShowSubtitle("HAND dabao — darwaza kholo", 3f);
+            }
+        }
+        else if (doorPromptIcon != null)
+        {
+            doorPromptIcon.gameObject.SetActive(false);
+        }
+    }
+
+    private void EnsureDoorPromptIcon(Vector3 doorCenter)
+    {
+        if (doorPromptIcon != null) return;
+        GameObject go = new GameObject("DoorPromptIcon");
+        doorPromptIcon = go.AddComponent<SpriteRenderer>();
+        doorPromptIcon.sprite = ControlIcons.IconSprite(ControlIcons.IconKind.Hand);
+        doorPromptIcon.color = new Color(1f, 0.7f, 0.2f, 0.95f);
+        // Above the door, just outside the wall face, so it reads while
+        // approaching and never hides behind the panel. Sprite is 256 px
+        // at 100 ppu (2.56 m native) — 0.35 scale reads ~0.9 m.
+        doorPromptIcon.transform.position = doorCenter + new Vector3(0.8f, 1.8f, 0f);
+        doorPromptIcon.transform.localScale = Vector3.one * 0.35f;
+        go.SetActive(false);
+    }
+
+    private void SetActionPrompt(bool on)
+    {
+        if (actionButton == null) return;
+        Image img = actionButton.GetComponent<Image>();
+        if (img == null) return;
+        if (on)
+        {
+            float pulse = 0.5f + 0.5f * Mathf.Sin(Time.time * 6f);
+            img.color = Color.Lerp(kBtnColor, kBtnOnColor, 0.6f + 0.4f * pulse);
+            actionButton.transform.localScale = Vector3.one * (1f + 0.15f * pulse);
+        }
+        else
+        {
+            img.color = kBtnColor;
+            actionButton.transform.localScale = Vector3.one;
         }
     }
 
@@ -377,6 +467,7 @@ public class MobileControls : MonoBehaviour
         // the symbols read clearly. Same anchors/functions as before.
         Button actionBtn = MakeIconButton(hudRoot, "ActionBtn", ControlIcons.IconKind.Hand,
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-62f, 62f), new Vector2(86f, 86f));
+        actionButton = actionBtn;
         actionBtn.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (player != null) player.Interact(); });
 
         Button jumpBtn = MakeIconButton(hudRoot, "JumpBtn", ControlIcons.IconKind.Jump,

@@ -430,6 +430,88 @@ public class ScreenshotTest
         Assert.IsNotNull(shot9, "Screenshot 9 (Nilesh face) failed to render");
         Assert.IsTrue(File.Exists(shot9), "Screenshot 9 file missing: " + shot9);
 
+        // ROUND 4 (door): the player flow must work end to end — open
+        // the door via the REAL TryInteract path (not SetOpen), then walk
+        // inside. Shot 11 is the open door from the front (frame + dark
+        // doorway visible), shot 12 is Nilesh inside his house. The panel
+        // true-size assert lives in AuditLogicTest B1 — these shots are
+        // the visual proof of the same fix.
+        Component gmDoor = FindComponent("GameManager");
+        Assert.IsNotNull(gmDoor, "GameManager not found for door shots");
+        Transform doorFrontShot = GameObject.Find("DoorFront") != null
+            ? GameObject.Find("DoorFront").transform : null;
+        Assert.IsNotNull(doorFrontShot, "DoorFront not found for door shots");
+        GameObject doorObjShot = GameObject.Find("Door_Player");
+        Assert.IsNotNull(doorObjShot, "Door_Player not found for door shots");
+        Component dcShot = doorObjShot.GetComponent("DoorController") as Component;
+        Assert.IsNotNull(dcShot, "DoorController not found for door shots");
+        Vector3 doorCenterShot = (Vector3)dcShot.GetType().GetProperty("DoorCenter").GetValue(dcShot, null);
+        // Teleport to 1.0 m east of the door centre (inside the 1.5 m
+        // door-priority radius) — the prompt must be active there.
+        player.transform.position = new Vector3(doorCenterShot.x + 1.0f, 0.5f, doorCenterShot.z);
+        yield return null;
+        yield return null; // let MobileControls.Update run the prompt check
+        Component uiShot = FindComponent("MobileControls");
+        Assert.IsNotNull(uiShot, "MobileControls not found for door shots");
+        bool promptShot = (bool)uiShot.GetType().GetProperty("DoorPromptActive").GetValue(uiShot, null);
+        Assert.IsTrue(promptShot, "Door prompt NOT active 1 m from the closed door — the player gets no hint");
+        // Open via the real path.
+        gmDoor.GetType().GetMethod("TryInteract").Invoke(gmDoor, null);
+        yield return new WaitForSeconds(1.5f);
+        bool openShot = (bool)dcShot.GetType().GetProperty("IsOpen").GetValue(dcShot, null);
+        Assert.IsTrue(openShot, "Door did not open via TryInteract — the phone flow is broken");
+        // Shot 11: open door from the front (east), player in frame.
+        Behaviour followD = cam.GetComponent("CameraFollow") as Behaviour;
+        if (followD != null) followD.enabled = false;
+        cam.transform.position = new Vector3(doorCenterShot.x + 4.5f, 2.0f, doorCenterShot.z);
+        cam.transform.LookAt(new Vector3(doorCenterShot.x, 1.2f, doorCenterShot.z));
+        yield return null;
+        string shot11 = RenderScreenshot(cam, "door-open.png", 1280, 720);
+        Assert.IsNotNull(shot11, "Screenshot 11 (door open) failed to render");
+        Assert.IsTrue(File.Exists(shot11), "Screenshot 11 file missing: " + shot11);
+        // Walk inside: drive through the doorway (direction derived
+        // from the door centre, not hardcoded).
+        Component pcShot = player.GetComponent("PlayerController") as Component;
+        Assert.IsNotNull(pcShot, "PlayerController not found for door walk-in");
+        FieldInfo moveShot = pcShot.GetType().GetField("moveInput");
+        Assert.IsNotNull(moveShot, "moveInput field not found for door walk-in");
+        float yawShot = cam.transform.eulerAngles.y * Mathf.Deg2Rad;
+        Vector3 fwdShot = new Vector3(Mathf.Sin(yawShot), 0f, Mathf.Cos(yawShot));
+        Vector3 rightShot = new Vector3(fwdShot.z, 0f, -fwdShot.x);
+        Vector3 wantShot = new Vector3(doorCenterShot.x - player.transform.position.x, 0f, doorCenterShot.z - player.transform.position.z);
+        wantShot.Normalize();
+        float hShot = Vector3.Dot(wantShot, rightShot);
+        float vShot = Vector3.Dot(wantShot, fwdShot);
+        float driveShot = 0f;
+        while (driveShot < 2.5f)
+        {
+            moveShot.SetValue(pcShot, new Vector2(hShot, vShot));
+            yield return null;
+            driveShot += Time.deltaTime;
+        }
+        moveShot.SetValue(pcShot, Vector2.zero);
+        // Hard assert: the player is INSIDE the house now.
+        System.Type gmTypeShot = FindType("GameManager");
+        Assert.IsNotNull(gmTypeShot, "GameManager type not found for inside check");
+        MethodInfo insideShot = gmTypeShot.GetMethod("IsInsidePlayerHouse", BindingFlags.Public | BindingFlags.Static);
+        Assert.IsNotNull(insideShot, "IsInsidePlayerHouse not found");
+        bool insideShotRes = (bool)insideShot.Invoke(null, new object[] { player.transform.position });
+        Debug.Log("[Test] Door walk-in: player at " + player.transform.position + " inside=" + insideShotRes);
+        Assert.IsTrue(insideShotRes, "Player did NOT get inside the house after driving through the open door (at " + player.transform.position + ")");
+        // Shot 12: camera inside the house, looking at Nilesh (bed/table
+        // visible) — computed from his actual end position so the shot
+        // frames him wherever he stopped.
+        Vector3 endShot = player.transform.position;
+        cam.transform.position = new Vector3(endShot.x + 3.5f, 1.7f, endShot.z + 2.2f);
+        cam.transform.LookAt(endShot + new Vector3(0f, 1.0f, 0f));
+        yield return null;
+        string shot12 = RenderScreenshot(cam, "player-inside-house.png", 1280, 720);
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (followD != null) followD.enabled = true;
+        Assert.IsNotNull(shot12, "Screenshot 12 (player inside) failed to render");
+        Assert.IsTrue(File.Exists(shot12), "Screenshot 12 file missing: " + shot12);
+
         // ROUND 4 (look): dusk shot — the golden-hour look is the whole
         // point of this round, so prove it: drive the cycle to mid-dusk
         // and shoot from the gameplay camera. The sun must read orange
@@ -471,7 +553,7 @@ public class ScreenshotTest
         Assert.IsNotNull(shot4, "Night angle-2 screenshot failed to render");
         Assert.IsTrue(File.Exists(shot4), "Night angle-2 screenshot file missing: " + shot4);
 
-        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot10 + " | " + shot3 + " | " + shot4);
+        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot11 + " | " + shot12 + " | " + shot10 + " | " + shot3 + " | " + shot4);
         yield return null;
     }
 

@@ -70,52 +70,87 @@ public class AuditLogicTest
         FieldInfo moveInputField = pc.GetType().GetField("moveInput");
         Assert.IsNotNull(moveInputField, "moveInput field not found");
 
-        // ---- B1: doorway probe (CanMoveTo along the door path) ----
+        // ---- B1 (ROUND 4 DOOR rewrite): the PLAYER flow, not the
+        // mechanism. The old B1 called SetOpen(true) directly (bypassing
+        // TryInteract, the ACTION button, the range + lock checks and the
+        // input gate), teleported, and never asserted anything — it passed
+        // while the phone flow failed. Now: the door must BLOCK while
+        // closed, the panel must be true size, the prompt must fire in
+        // range, TryInteract must open it, the gap must become walkable,
+        // and driving through must end INSIDE the house (hard assert).
+        // All points derive from the real door centre / DoorFront.
         Transform doorFront = GameObject.Find("DoorFront") != null
             ? GameObject.Find("DoorFront").transform : null;
-        Vector3 doorFrontPos = doorFront != null ? doorFront.position : new Vector3(-3.75f, 0.5f, 6f);
+        Assert.IsNotNull(doorFront, "DoorFront missing — B1 cannot run");
+        Vector3 doorFrontPos = doorFront.position;
         Debug.Log("[Audit] DoorFront at " + doorFrontPos);
-        // Points from outside the door (east) through the doorway to inside.
-        Vector3[] path = {
-            new Vector3(-3.75f, 0.5f, 6f),
-            new Vector3(-4.5f, 0.5f, 6f),
-            new Vector3(-5.0f, 0.5f, 6f),
-            new Vector3(-5.5f, 0.5f, 6f),
-            new Vector3(-5.75f, 0.5f, 6f),
-            new Vector3(-6.5f, 0.5f, 6f),
-            new Vector3(-7.5f, 0.5f, 6f),
-            new Vector3(-9f, 0.5f, 6f),
-        };
-        foreach (Vector3 p in path)
-            Debug.Log("[Audit] CanMoveTo(" + p + ", 0.45) = " + CanMoveTo(p, 0.45f));
-
-        // ---- B1 gameplay: open the door, then drive the player through it ----
         GameObject doorObj = GameObject.Find("Door_Player");
-        if (doorObj != null)
-        {
-            Component dc = GetComp(doorObj, "DoorController");
-            if (dc != null)
-            {
-                MethodInfo setOpen = dc.GetType().GetMethod("SetOpen", BindingFlags.Public | BindingFlags.Instance);
-                if (setOpen != null) setOpen.Invoke(dc, new object[] { true });
-                Debug.Log("[Audit] Door opened via SetOpen(true)");
-            }
-        }
-        yield return new WaitForSeconds(1.5f); // let the door swing + block unregister
-        player.transform.position = new Vector3(doorFrontPos.x, 0.5f, doorFrontPos.z);
+        Assert.IsNotNull(doorObj, "Door_Player missing — B1 cannot run");
+        Component dc = GetComp(doorObj, "DoorController");
+        Assert.IsNotNull(dc, "DoorController missing — B1 cannot run");
+        PropertyInfo doorCenterProp = dc.GetType().GetProperty("DoorCenter");
+        Assert.IsNotNull(doorCenterProp, "DoorController.DoorCenter missing");
+        Vector3 doorCenter = (Vector3)doorCenterProp.GetValue(dc, null);
+        doorCenter.y = 0.5f;
+        Debug.Log("[Audit] B1 door centre: " + doorCenter);
+        // (a) Panel must be TRUE size (1.5 x 2.1 m real path, 1.2 m
+        // primitive fallback) — the old bug was a 1.46x slab (~2.2 wide,
+        // ~3.1 tall). The panel is hinge-local (doorW, doorH, 0.09) at
+        // closed yaw 90 deg, so its world bounds read ~(0.09, 2.1, 1.5).
+        GameObject panel = GameObject.Find("DoorPanel");
+        Assert.IsNotNull(panel, "DoorPanel missing — B1 cannot run");
+        Renderer panelR = panel.GetComponent<Renderer>();
+        Assert.IsNotNull(panelR, "DoorPanel has no Renderer");
+        Vector3 panelSize = panelR.bounds.size;
+        Debug.Log("[Audit] B1 panel world size: " + panelSize);
+        Assert.LessOrEqual(panelSize.y, 2.3f, "Door panel too TALL (" + panelSize.y + " m) — hut-scale slab bug is back");
+        Assert.GreaterOrEqual(Mathf.Max(panelSize.x, panelSize.z), 1.0f, "Door panel too NARROW (" + panelSize + ") — not a real door");
+        Assert.LessOrEqual(Mathf.Max(panelSize.x, panelSize.z), 1.7f, "Door panel too WIDE (" + panelSize + ") — hut-scale slab bug is back");
+        // (b) Closed door must BLOCK the doorway.
+        Assert.IsFalse(CanMoveTo(doorCenter, 0.45f), "Doorway walkable while the door is CLOSED — closed block missing");
+        // (c) Teleport to 1.0 m east of the door centre (inside the 1.5 m
+        // door-priority radius, so no NPC can steal the press) — the
+        // prompt must be active there.
+        player.transform.position = new Vector3(doorCenter.x + 1.0f, 0.5f, doorCenter.z);
         yield return null;
-        // Drive west (-x) toward/through the door: compute input from camera yaw.
+        yield return null; // let MobileControls.Update run the prompt check
+        GameObject gmGO = GameObject.Find("GameManager");
+        Assert.IsNotNull(gmGO, "GameManager object missing for door prompt check");
+        Component uiComp = GetComp(gmGO, "MobileControls");
+        Assert.IsNotNull(uiComp, "MobileControls missing for door prompt check");
+        PropertyInfo promptProp = uiComp.GetType().GetProperty("DoorPromptActive");
+        Assert.IsNotNull(promptProp, "MobileControls.DoorPromptActive missing");
+        Assert.IsTrue((bool)promptProp.GetValue(uiComp, null),
+            "Door prompt NOT active 1 m from the closed door — the player gets no hint");
+        // (d) Open via the REAL path — GameManager.TryInteract, the same
+        // call the ACTION button makes. Not SetOpen.
+        Component gmComp = GetComp(gmGO, "GameManager");
+        Assert.IsNotNull(gmComp, "GameManager missing for TryInteract");
+        MethodInfo tryInteract = gmComp.GetType().GetMethod("TryInteract", BindingFlags.Public | BindingFlags.Instance);
+        Assert.IsNotNull(tryInteract, "GameManager.TryInteract missing");
+        tryInteract.Invoke(gmComp, null);
+        yield return new WaitForSeconds(1.5f); // let the door swing + block unregister
+        PropertyInfo isOpenProp = dc.GetType().GetProperty("IsOpen");
+        Assert.IsTrue((bool)isOpenProp.GetValue(dc, null),
+            "Door did NOT open via TryInteract — the phone flow is broken");
+        // (e) The gap must now be walkable.
+        Assert.IsTrue(CanMoveTo(doorCenter, 0.45f), "Doorway still BLOCKED after opening — block never unregistered");
+        // (f) Drive through the open doorway (direction derived from the
+        // door centre, not hardcoded) and HARD-assert the player ends up
+        // INSIDE the house.
+        yield return null;
         Camera cam = Camera.main;
         float yaw = cam != null ? cam.transform.eulerAngles.y * Mathf.Deg2Rad : 0f;
         Vector3 fwd = new Vector3(Mathf.Sin(yaw), 0f, Mathf.Cos(yaw));
         Vector3 right = new Vector3(fwd.z, 0f, -fwd.x);
-        Vector3 want = new Vector3(-1f, 0f, 0f);
+        Vector3 want = new Vector3(doorCenter.x - player.transform.position.x, 0f, doorCenter.z - player.transform.position.z);
+        want.Normalize();
         float h = Vector3.Dot(want, right);
         float v = Vector3.Dot(want, fwd);
-        Debug.Log("[Audit] Driving west: camYaw=" + (yaw * Mathf.Rad2Deg) + " input=(" + h + "," + v + ")");
+        Debug.Log("[Audit] Driving through door: input=(" + h + "," + v + ")");
         Vector3 startPos = player.transform.position;
         float driveT = 0f;
-        while (driveT < 5f)
+        while (driveT < 3f)
         {
             moveInputField.SetValue(pc, new Vector2(h, v));
             yield return null;
@@ -125,12 +160,15 @@ public class AuditLogicTest
         Vector3 endPos = player.transform.position;
         Debug.Log("[Audit] Door drive: start=" + startPos + " end=" + endPos
             + " dx=" + (endPos.x - startPos.x));
-        // House interior is x < -5.75 (east face) and |z-6|<=3, |x+9|<=3.5.
-        bool insideHouse = endPos.x < -6.0f && Mathf.Abs(endPos.z - 6f) <= 3f;
+        System.Type gmType = GetGameType("GameManager");
+        Assert.IsNotNull(gmType, "GameManager type not found for inside check");
+        MethodInfo insideM = gmType.GetMethod("IsInsidePlayerHouse", BindingFlags.Public | BindingFlags.Static);
+        Assert.IsNotNull(insideM, "GameManager.IsInsidePlayerHouse not found");
+        bool insideHouse = (bool)insideM.Invoke(null, new object[] { endPos });
         Debug.Log("[Audit] B1 RESULT: player inside house = " + insideHouse
             + " (endPos=" + endPos + ")");
-        // NOTE: no hard assert here — the audit must continue to the other
-        // checks even if B1 fails; the result is recorded in the report.
+        Assert.IsTrue(insideHouse,
+            "B1 FAILED: player did NOT get inside the house after driving through the open door (endPos=" + endPos + ")");
 
         // ---- Walk speed: open ground, full forward input, 2 s ----
         player.transform.position = new Vector3(0f, 0.5f, 0f);

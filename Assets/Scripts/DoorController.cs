@@ -18,6 +18,23 @@ public class DoorController : MonoBehaviour
     public bool IsOpen { get; private set; }
     public bool IsLocked { get; private set; }
 
+    // ROUND 4 DOOR: the dark doorway quad (VillageBuilder assigns it) —
+    // shown only while the door is open, so an open door reveals
+    // darkness instead of wall texture. Single-sided (faces east), so
+    // it never blocks the view out from inside.
+    public GameObject doorwayDark;
+
+    // ROUND 4 DOOR: the world-space centre of the doorway (the closed
+    // collision block's centre: hinge + half the door width, at door
+    // mid-height). Interaction ranges measure to THIS point, XZ-only —
+    // the hinge sits at the door's edge, so measuring to it shrank the
+    // usable range and made the check depend on which edge the player
+    // stood near.
+    public Vector3 DoorCenter
+    {
+        get { return closedBlockCenter; }
+    }
+
     private float targetYaw;
     private float currentYaw;
     private bool blockRegistered;
@@ -62,6 +79,8 @@ public class DoorController : MonoBehaviour
         targetYaw = open ? openYaw : closedYaw;
         if (open) AudioManager.PlayDoorOpen(transform.position);
         else AudioManager.PlayDoorClose(transform.position);
+        // ROUND 4 DOOR: the dark doorway quad shows only while open.
+        if (doorwayDark != null) doorwayDark.SetActive(open);
         if (open)
         {
             UnregisterBlock();

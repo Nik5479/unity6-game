@@ -30,13 +30,19 @@ public class GameManager : MonoBehaviour
     // Fix-push P1-9: the player's house (hut at (-9, 6) in VillageBuilder,
     // normalised to ~6.5 m wide). Dawn only counts as survived if the
     // player is inside these bounds.
+    // ROUND 4 DOOR: the half extents come from the ACTUAL hut footprint
+    // (VillageBuilder sets them in SetupSystems from the measured world
+    // bounds, ~±4.65/±4.15). The old hardcoded ±3.5/±3.0 was smaller than
+    // the hut — a player standing inside near the walls counted as
+    // outside at dawn. Default = the old values until SetupSystems runs.
     public static readonly Vector3 PlayerHouseCenter = new Vector3(-9f, 0f, 6f);
+    public static Vector3 PlayerHouseHalfExtents = new Vector3(3.5f, 0f, 3f);
     public const string MukhiyaWarning = "Raat me koi bhi darwaza khatkhataye to kholna mat, awaaz chahe kisi apne ki hi kyun na ho!";
 
     public static bool IsInsidePlayerHouse(Vector3 p)
     {
-        return Mathf.Abs(p.x - PlayerHouseCenter.x) <= 3.5f
-            && Mathf.Abs(p.z - PlayerHouseCenter.z) <= 3f;
+        return Mathf.Abs(p.x - PlayerHouseCenter.x) <= PlayerHouseHalfExtents.x
+            && Mathf.Abs(p.z - PlayerHouseCenter.z) <= PlayerHouseHalfExtents.z;
     }
 
     private int foodCollected;
@@ -92,11 +98,24 @@ public class GameManager : MonoBehaviour
     }
 
     // ACTION button / E key: nearest interactable within range wins.
+    // ROUND 4 DOOR: the door wins when the player is right at it
+    // (< 1.5 m XZ) — before pickups/NPCs, so pressing ACTION to close
+    // the door from inside no longer collects the Dawai crate instead,
+    // and a nearby NPC can no longer steal the press at the door itself.
+    // From further out the door still works, at 4.0 m XZ to the door
+    // centre (was: 3.0 m 3D distance to the hinge — the hinge sits at
+    // the door's edge and the Y difference shrank the usable range).
     public void TryInteract()
     {
         if (isOver || player == null) return;
 
         Vector3 p = player.transform.position;
+
+        if (playerDoor != null && DistXZ(p, playerDoor.DoorCenter) < 1.5f)
+        {
+            playerDoor.ToggleDoor();
+            return;
+        }
 
         // Fix-push P2-18b: any pickup works the same way as the food crate.
         if (TryCollectPickup(foodPickup)) return;
@@ -125,13 +144,22 @@ public class GameManager : MonoBehaviour
         }
 
         if (playerDoor != null &&
-            Vector3.Distance(p, playerDoor.transform.position) < 3.0f)
+            DistXZ(p, playerDoor.DoorCenter) < 4.0f)
         {
             playerDoor.ToggleDoor();
             return;
         }
 
         ShowSubtitle("Paas me kuch nahi hai — kuaan ya darwaze ke paas jao.", 2f);
+    }
+
+    // XZ-only distance (ignore height — the door centre sits at y=1.05
+    // and the player at y=0.5, so a 3D check shrank the range).
+    private static float DistXZ(Vector3 a, Vector3 b)
+    {
+        float dx = a.x - b.x;
+        float dz = a.z - b.z;
+        return Mathf.Sqrt(dx * dx + dz * dz);
     }
 
     private bool TryCollectPickup(Pickup p)
