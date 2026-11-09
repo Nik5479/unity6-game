@@ -2520,22 +2520,25 @@ public class VillageBuilder : MonoBehaviour
         // it was tiny on screen is GONE — it made ring trees wink in/out
         // as the camera panned. If a far variant fails to load, the near
         // tree is used as before.
-        GameObject mangoFar = null, banyanFar = null, palmFar = null;
+        GameObject mangoFar = null, banyanFar = null;
         Vector3 hidden = new Vector3(0f, 0f, -80f);
         yield return GltfModelLoader.LoadModel("mango_tree_far.glb", villageRoot, "Tree_MangoFar", hidden, 0f, 9f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => mangoFar = g);
         yield return GltfModelLoader.LoadModel("banyan_far.glb", villageRoot, "Tree_BanyanFar", hidden, 0f, 13f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => banyanFar = g);
-        yield return GltfModelLoader.LoadModel("palm_far.glb", villageRoot, "Tree_PalmFar", hidden, 0f, 10f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => palmFar = g);
-        // PHONE-VIDEO 2026-11-09 (fix #7): the far palm carries the same
-        // HP_Palm3_* materials as the hero palm — fix it too, so the whole
-        // jungle ring (which clones this source) gets green fronds.
-        if (palmFar != null) FixPalmMaterials(palmFar);
+        // ROUND 5b: the ring palm is REMOVED, not replaced — same broken
+        // model as the hero palm. FixPalmMaterials DOES apply (CI log
+        // proves 3 mats, baseMap=True) yet the fronds render BLACK on
+        // Vulkan (emulator) while green in the CI editor: a renderer
+        // difference no material tweak fixes. No verified replacement
+        // exists (Round 5 search: Poly Haven has no palm, the rest are
+        // low-poly/banned/paid/login-walled). The ring is mango/banyan
+        // only now; restore a palm here if a verified one is found.
+        // yield return GltfModelLoader.LoadModel("palm_far.glb", villageRoot, "Tree_PalmFar", hidden, 0f, 10f,
+        //     GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None, g => palmFar = g);
         GameObject[] ringSources = new GameObject[] {
             mangoFar != null ? mangoFar : mango,
-            banyanFar != null ? banyanFar : banyan,
-            palmFar != null ? palmFar : palm };
+            banyanFar != null ? banyanFar : banyan };
         foreach (GameObject rs in ringSources)
         {
             if (rs == null) continue;
@@ -2558,7 +2561,6 @@ public class VillageBuilder : MonoBehaviour
         // The far sources were only templates for the ring clones.
         if (mangoFar != null) mangoFar.SetActive(false);
         if (banyanFar != null) banyanFar.SetActive(false);
-        if (palmFar != null) palmFar.SetActive(false);
 
         // Wood fences along the main lane: posts + two rails per segment.
         for (int i = 0; i < 5; i++)
