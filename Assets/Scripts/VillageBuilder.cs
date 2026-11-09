@@ -415,6 +415,11 @@ public class VillageBuilder : MonoBehaviour
         stack.Push(root);
         while (stack.Count > 0)
         {
+            // ROUND 4 (pop-in): if the watchdog already called
+            // FinishBuild() (buildFinished), stop placing objects — the
+            // player is already playing behind the loading gate, and any
+            // object placed after the gate opens is a pop-in.
+            if (buildFinished) yield break;
             System.Collections.IEnumerator top = stack.Peek();
             bool moved = false; object cur = null; bool failed = false;
             try
@@ -454,19 +459,29 @@ public class VillageBuilder : MonoBehaviour
         try
         {
             yield return SafeStep("PlayerModel", BuildPlayerModelAsync());
+            if (buildFinished) yield break;
             yield return SafeStep("Houses", BuildHousesAsync());
+            if (buildFinished) yield break;
             yield return SafeStep("WellAndLamp", BuildWellAndLampAsync());
+            if (buildFinished) yield break;
             // Freeze fix: the monster is gameplay-critical (the night
             // knock IS the game) — load it early, while the deadline
             // still allows it, instead of last (where a slow phone never
             // reached it and the game started with the capsule fallback).
             yield return SafeStep("MonsterModel", BuildMonsterModelAsync());
+            if (buildFinished) yield break;
             RunStep("Field", BuildField);
+            if (buildFinished) yield break;
             yield return SafeStep("JungleAndFences", BuildJungleAndFencesAsync());
+            if (buildFinished) yield break;
             yield return SafeStep("Props", BuildPropsAsync());
+            if (buildFinished) yield break;
             yield return SafeStep("NewModels", BuildNewModelsAsync());
+            if (buildFinished) yield break;
             RunStep("WarmLights", BuildWarmLights);
+            if (buildFinished) yield break;
             RunStep("CleanupStrays", CleanupStrays);
+            if (buildFinished) yield break;
             RunStep("Moon", BuildMoon);
         }
         finally
@@ -565,6 +580,9 @@ public class VillageBuilder : MonoBehaviour
     // Runs one build step; a failure is logged and the build continues.
     private void RunStep(string name, System.Action step)
     {
+        // ROUND 4 (pop-in): same guard as SafeStep — never run a build
+        // step after the watchdog already finished the build.
+        if (buildFinished) return;
         try
         {
             step();
@@ -2335,9 +2353,11 @@ public class VillageBuilder : MonoBehaviour
         // PERF 2026-11-08: the ring used to clone the full-detail trees 36x
         // (~3 M triangles). It now clones dedicated far-distance variants
         // (~3k tris each, 256 px KTX2 textures, made offline with
-        // gltf-transform), each clone gets a LODGroup that culls it when it
-        // is tiny on screen, and materials have GPU instancing on. If a far
-        // variant fails to load, the near tree is used as before.
+        // gltf-transform), and materials have GPU instancing on.
+        // ROUND 4 (pop-in): the LODGroup that used to cull a clone when
+        // it was tiny on screen is GONE — it made ring trees wink in/out
+        // as the camera panned. If a far variant fails to load, the near
+        // tree is used as before.
         GameObject mangoFar = null, banyanFar = null, palmFar = null;
         Vector3 hidden = new Vector3(0f, 0f, -80f);
         yield return GltfModelLoader.LoadModel("mango_tree_far.glb", villageRoot, "Tree_MangoFar", hidden, 0f, 9f,
@@ -2447,15 +2467,13 @@ public class VillageBuilder : MonoBehaviour
         float s = 0.9f + (index % 3) * 0.12f;
         c.transform.localScale = src.transform.localScale * s;
         c.SetActive(true);
-        // Distance culling: drop the clone when it covers < 2.5% of the
-        // screen height (only far-side ring trees in practice).
-        Renderer[] rr = c.GetComponentsInChildren<Renderer>();
-        if (rr.Length > 0)
-        {
-            LODGroup lg = c.AddComponent<LODGroup>();
-            lg.SetLODs(new LOD[] { new LOD(0.025f, rr) });
-            lg.RecalculateBounds();
-        }
+        // ROUND 4 (pop-in): NO LODGroup here. A single LOD at 0.025
+        // culls the whole tree when it covers < 2.5% of the screen, so
+        // ring trees winked in/out as the camera panned — the "village
+        // appears/disappears" bug. The ring already uses dedicated
+        // ~3k-tri far variants, so ~36 trees staying rendered costs
+        // ~108k tris total — trivial. Never a single-LOD setup whose
+        // only next step is "culled".
         Block(pos + new Vector3(0f, 1.1f, 0f), new Vector3(0.6f, 2.2f, 0.6f));
     }
 
