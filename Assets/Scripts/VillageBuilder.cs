@@ -1040,6 +1040,12 @@ public class VillageBuilder : MonoBehaviour
         // (reference: a wet road reads darker + shinier than dry ground).
         matGround = MakeMat("GroundMudPBR", LoadTex("brown_mud_dry_diff_1k"), Color.white, 0.05f, new Vector2(200f, 200f),
             LoadTex("brown_mud_dry_nor_gl_1k"), LoadTex("brown_mud_dry_metal_smooth_1k"), LoadTex("brown_mud_dry_ao_1k"));
+        // ROUND 5b: the metal-smooth map averages 0.47 smoothness (peaks
+        // 1.0) and MakeMat leaves the scalar at 1, so the ground
+        // mirror-reflects the blue sky at grazing angles — the blue
+        // smears in the ground close-up. Cap the scalar to 0.35: the map
+        // still varies it, but the max is 0.35 and the average ~0.16.
+        if (matGround != null) matGround.SetFloat("_Smoothness", 0.35f);
         UpgradeRuntimeMat(matPlaster, 0.3f);
         UpgradeRuntimeMat(matWood, 0.35f);
         UpgradeRuntimeMat(matRoof, 0.4f);
@@ -1502,7 +1508,11 @@ public class VillageBuilder : MonoBehaviour
         }
         const int S = 1024;
         const float Tiling = 7f;
-        const float MudRepeats = 28f;
+        // ROUND 5b: MudRepeats 28 -> 16. At 28 the 1024px canvas holds
+        // 36 px per 2.5 m mud repeat, so the ground blurs into a smudge
+        // at close range (ground-closeup.png). At 16 each repeat is
+        // 64 px / ~4.4 m — same bake cost, visibly sharper mud.
+        const float MudRepeats = 16f;
         float tileU = Mathf.Floor(Tiling * 0.5f); // central tile index (3 of 0..6)
         float minX = b.min.x, sizeX = b.size.x, minZ = b.min.z, sizeZ = b.size.z;
 
@@ -1539,7 +1549,7 @@ public class VillageBuilder : MonoBehaviour
         tex.name = "GroundMacroMud";
         tex.filterMode = FilterMode.Bilinear;
         tex.wrapMode = TextureWrapMode.Repeat;
-        tex.anisoLevel = 4;
+        tex.anisoLevel = 8; // ROUND 5b: 4 -> 8, sharper mud at grazing angles (the close-up camera).
         tex.SetPixels(px);
         tex.Apply(true, true);
         return tex;
@@ -1599,8 +1609,11 @@ public class VillageBuilder : MonoBehaviour
                     : 1f - Smooth01(10f, 10.9f, Mathf.Abs(wx));
                 float mask = maskX * maskZ;
                 if (mask <= 0f) continue;
-                Color wet = SampleWrapped(mud, (pxx + 0.5f) / s * 28f + 0.37f, (py + 0.5f) / s * 28f + 0.61f);
-                wet = new Color(wet.r * 0.55f, wet.g * 0.50f, wet.b * 0.45f, 1f);
+                Color wet = SampleWrapped(mud, (pxx + 0.5f) / s * 16f + 0.37f, (py + 0.5f) / s * 16f + 0.61f);
+                // ROUND 5b: the old 0.55/0.50/0.45 tint read as near-black
+                // in the close-up (the lane is most of that shot). Lighter
+                // wet mud: 0.68/0.63/0.58 — still clearly darker than dry.
+                wet = new Color(wet.r * 0.68f, wet.g * 0.63f, wet.b * 0.58f, 1f);
                 int idx = py * s + pxx;
                 px[idx] = Color.Lerp(px[idx], wet, mask * 0.85f);
             }
