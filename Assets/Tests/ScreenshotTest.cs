@@ -78,9 +78,15 @@ public class ScreenshotTest
         Assert.IsNull(GameObject.Find("Puddle"), "Old opaque Puddle discs still present — pilot water fix missing");
         // OVERNIGHT R3: the WaterPuddle discs are GONE (removed — they
         // read as white/dark stain ovals in both renderers, never as
-        // water). The wet look is the WetSheen strips + dark mud lanes.
+        // water).
         Assert.IsNull(GameObject.Find("WaterPuddle"), "WaterPuddle discs still present — overnight R3 removed them");
-        Assert.IsNotNull(GameObject.Find("WetSheenNS"), "WetSheen strip missing — wet-road look has no source");
+        // ROUND 3 (2026-11-09): the WetSheen strips are GONE too — the
+        // hard-edged translucent rectangles read as painted stripes, and
+        // the wet look now lives in the ground plane's own macro texture
+        // (darkened wet-lane bands baked in, see VillageBuilder). No
+        // ground patch / sheen object may exist at all (asserted in a4).
+        Assert.IsNull(GameObject.Find("WetSheenNS"), "WetSheenNS strip still present — Round 3 removed the sheen boxes");
+        Assert.IsNull(GameObject.Find("WetSheenEW"), "WetSheenEW strip still present — Round 3 removed the sheen boxes");
         // OVERNIGHT (Ambassador FIXED): the car is BACK — the Blender
         // material split replaced the toy-painted file (see VillageBuilder).
         Assert.IsNotNull(GameObject.Find("HeroCar"), "HeroCar missing — the fixed Ambassador file should load");
@@ -95,29 +101,51 @@ public class ScreenshotTest
         // ACTIVE objects, so null here proves it is hidden, not missing.
         Assert.IsNull(GameObject.Find("Moon"), "Moon visible in day sky — SetMoon(0) must hide the disc");
 
-        // (a4) PHONE-VIDEO 2026-11-09: the flat-disc fix — every ground
-        // patch (lane / chowk / grass / variation) must be a TEXTURED
-        // flat patch, never a texture-less flat-colour plate. The old
-        // matMudFlat discs read as pale grey floating plates on the phone
-        // (frames 22s/37s) and in CI. Assert on the materials: a patch
-        // whose material has no main texture is a flat plate.
-        int texturedPatches = 0;
-        int flatPatches = 0;
+        // (a4) ROUND 3 (PHONE-VIDEO 2026-11-09): NO ground patch objects
+        // at all. Round 1's textured flat fans STILL read as big flat
+        // ovals in CI shot-07/shot-10 (9 m cobble disc, dark-brown lane /
+        // variation ovals), so every patch object is deleted — DirtPath,
+        // DirtPathEW, ChowkCobble, GrassPatch, GroundPatch — and the
+        // WetSheen strips with them. Ground variation now lives IN the
+        // ground plane's own texture: the Ground renderer's material must
+        // be a PBR material (normal + occlusion maps) whose main texture
+        // is the baked macro texture ("GroundMacroMud", 7x7 tiling).
+        // The old ">30 textured patches" count is retired — zero patch
+        // objects IS the fix.
+        foreach (string patchName in new string[] { "DirtPath", "DirtPathEW", "ChowkCobble",
+            "GrassPatch", "GroundPatch", "WetSheenNS", "WetSheenEW" })
+        {
+            Assert.IsNull(GameObject.Find(patchName),
+                "Ground patch object still present: " + patchName + " — Round 3 deleted all ground patches");
+        }
+        int flatPatchMeshes = 0;
         foreach (Transform t in village.GetComponentsInChildren<Transform>(true))
         {
-            if (t.name != "DirtPath" && t.name != "DirtPathEW" && t.name != "ChowkCobble"
-                && t.name != "GrassPatch" && t.name != "GroundPatch") continue;
-            Renderer pr = t.GetComponent<Renderer>();
-            if (pr == null || pr.sharedMaterial == null) { flatPatches++; continue; }
-            Material pm = pr.sharedMaterial;
-            if (pm.mainTexture == null || pm.name.Contains("MudFlat")) flatPatches++;
-            else texturedPatches++;
-            Debug.Log("[Test] Ground patch " + t.name + " mat=" + pm.name
-                + " tex=" + (pm.mainTexture != null ? pm.mainTexture.name : "NULL"));
+            MeshFilter mf = t.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null && mf.sharedMesh.name == "FlatPatchDisc") flatPatchMeshes++;
         }
-        Debug.Log("[Test] Textured ground patches: " + texturedPatches + ", flat/texture-less: " + flatPatches);
-        Assert.Greater(texturedPatches, 30, "Too few textured ground patches (" + texturedPatches + ") — flat-patch fix missing");
-        Assert.AreEqual(0, flatPatches, "Texture-less flat ground plates still present (" + flatPatches + ") — the MudFlat discs must be gone");
+        Assert.AreEqual(0, flatPatchMeshes, "FlatPatchDisc meshes still present under Village (" + flatPatchMeshes + ") — Round 3 deleted the FlatPatch mesh");
+        GameObject groundObj = GameObject.Find("Ground");
+        Assert.IsNotNull(groundObj, "Ground plane not found in Main scene");
+        Renderer groundR = (groundObj != null) ? groundObj.GetComponent<Renderer>() : null;
+        Assert.IsNotNull(groundR, "Ground plane has no Renderer");
+        Material groundMat = (groundR != null) ? groundR.material : null;
+        Assert.IsNotNull(groundMat, "Ground plane has no material");
+        if (groundMat != null)
+        {
+            Debug.Log("[Test] Ground mat=" + groundMat.name
+                + " tex=" + (groundMat.mainTexture != null ? groundMat.mainTexture.name : "NULL")
+                + " tiling=" + groundMat.mainTextureScale
+                + " bump=" + (groundMat.GetTexture("_BumpMap") != null)
+                + " ao=" + (groundMat.GetTexture("_OcclusionMap") != null));
+            Assert.IsNotNull(groundMat.mainTexture, "Ground has no main texture — macro texture missing");
+            Assert.AreEqual("GroundMacroMud", groundMat.mainTexture.name,
+                "Ground main texture is not the baked macro texture (" + groundMat.mainTexture.name + ") — Round 3 ground fix missing");
+            Assert.AreEqual(new Vector2(7f, 7f), groundMat.mainTextureScale,
+                "Ground macro texture tiling is not 7x7 (" + groundMat.mainTextureScale + ")");
+            Assert.IsNotNull(groundMat.GetTexture("_BumpMap"), "Ground has no normal map — PBR ground fix missing");
+            Assert.IsNotNull(groundMat.GetTexture("_OcclusionMap"), "Ground has no AO map — PBR ground fix missing");
+        }
 
         // (a5) PHONE-VIDEO 2026-11-09: palm + stilt-house material fixes.
         // Palm: HP_Palm3_* materials must be URP Lit (not the Shader Graph
@@ -338,7 +366,9 @@ public class ScreenshotTest
         Behaviour follow3 = cam.GetComponent("CameraFollow") as Behaviour;
         if (follow3 != null) follow3.enabled = false;
         // (7) Ground close-up: low over the north-south dirt lane, looking
-        // down the lane toward the chowk — lane patches + ground texture.
+        // down the lane toward the chowk. ROUND 3: this shot is the proof
+        // — continuous textured mud with the wet lane + cobbled chowk
+        // baked into the ground plane, NO oval patches, NO hard rims.
         cam.transform.position = new Vector3(3f, 1.5f, -8f);
         cam.transform.LookAt(new Vector3(0f, 0f, -3f));
         yield return null;

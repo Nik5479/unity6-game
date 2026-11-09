@@ -185,8 +185,12 @@ public class VillageBuilder : MonoBehaviour
     private Material matMudWet; // PILOT: darkened wet-lane variant of matMudDry.
     // PHONE-VIDEO 2026-11-09: matMudFlat (OVERNIGHT R3, texture-less flat
     // mud) is GONE — the flat colour + 0.85 smoothness read as pale grey
-    // floating plates on the phone (frames 22s/37s) and in CI. Wet lanes
-    // are textured PBR (matMudWet) on flat patches now.
+    // floating plates on the phone (frames 22s/37s) and in CI.
+    // ROUND 3 (2026-11-09): the textured flat PATCHES are gone too —
+    // they still read as ovals (CI shot-07/shot-10). Wet lanes / chowk /
+    // leaf litter now live IN the ground plane's own macro texture
+    // (BuildGroundMacroTexture); these materials are kept only so their
+    // source textures stay referenced — no patch object uses them.
     private Material matCobble;
     private Material matLeaves;
     private Material matWitheredGrass;
@@ -1081,82 +1085,15 @@ public class VillageBuilder : MonoBehaviour
     // random yaw reads as an irregular worn patch. Same scale semantics
     // as Cylinder (x/z = diameters, y = thickness).
     // NOTE (PHONE-VIDEO 2026-11-09): Disc() is kept for non-ground uses
-    // only — ground patches must use FlatPatch (below), never this: the
-    // cylinder rim reads as a floating plate (frames 9s/22s/37s).
+    // only — ground patches must NEVER use it: the cylinder rim reads
+    // as a floating plate (frames 9s/22s/37s).
+    // ROUND 3 (2026-11-09): ground patches are GONE entirely — even the
+    // rim-less FlatPatch fans read as ovals (CI shot-07/shot-10). Ground
+    // variation lives in the ground plane's own texture now, so Disc()
+    // currently has NO ground callers at all.
     private GameObject Disc(string name, Vector3 pos, Vector3 scale, Material mat, Transform parent)
     {
         return Cylinder(name, pos, scale, mat, parent);
-    }
-
-    // PHONE-VIDEO 2026-11-09: TRUE FLAT ground patch — a 24-segment disc
-    // fan lying IN the ground plane (no side wall, no thickness). The old
-    // Disc() is a flattened CYLINDER: its 4 cm vertical rim caught the
-    // sun as a dark ring and the whole plate hovered 5-11 cm above the
-    // ground, so every lane/grass patch read as a floating plate on the
-    // phone (frames 9s/22s/37s) and in CI (size-palm.png). A flat patch
-    // has no rim to catch light and sits ~1 cm above the ground, so it
-    // reads as worn earth, not a plate. UVs span 0..1 across the disc,
-    // so the material's tiling is the patch's texel density (callers
-    // clone + tile to the patch size). Mesh is a unit disc (diameter 1
-    // in XZ); scale = (width, 1, length). Winding is (0, i+2, i+1): the
-    // naive (0, i+1, i+2) order faces DOWN and URP backface-culls the
-    // patch from above.
-    private Mesh flatPatchMesh;
-
-    private Mesh GetFlatPatchMesh()
-    {
-        if (flatPatchMesh != null) return flatPatchMesh;
-        int segs = 24;
-        Mesh m = new Mesh();
-        m.name = "FlatPatchDisc";
-        Vector3[] verts = new Vector3[segs + 1];
-        Vector3[] norms = new Vector3[segs + 1];
-        Vector2[] uvs = new Vector2[segs + 1];
-        verts[0] = Vector3.zero;
-        norms[0] = Vector3.up;
-        uvs[0] = new Vector2(0.5f, 0.5f);
-        for (int i = 0; i < segs; i++)
-        {
-            float a = (i / (float)segs) * Mathf.PI * 2f;
-            float x = Mathf.Cos(a) * 0.5f;
-            float z = Mathf.Sin(a) * 0.5f;
-            verts[i + 1] = new Vector3(x, 0f, z);
-            norms[i + 1] = Vector3.up;
-            uvs[i + 1] = new Vector2(x + 0.5f, z + 0.5f);
-        }
-        int[] tris = new int[segs * 3];
-        for (int i = 0; i < segs; i++)
-        {
-            tris[i * 3] = 0;
-            tris[i * 3 + 1] = (i + 1) % segs + 1;
-            tris[i * 3 + 2] = i + 1;
-        }
-        m.vertices = verts;
-        m.normals = norms;
-        m.uv = uvs;
-        m.triangles = tris;
-        m.RecalculateBounds();
-        flatPatchMesh = m;
-        return m;
-    }
-
-    // Flat ground patch (see above). size = (width, length) diameters in
-    // metres. No collider, no shadow casting (a ~1 cm sheet must not cast
-    // a shadow onto the ground 1 cm below it); it RECEIVES shadows so the
-    // lane darkens under houses/trees like the ground does.
-    private GameObject FlatPatch(string name, Vector3 pos, Vector2 size, Material mat, Transform parent)
-    {
-        GameObject go = new GameObject(name);
-        go.transform.SetParent(parent != null ? parent : villageRoot, false);
-        go.transform.position = pos;
-        go.transform.localScale = new Vector3(size.x, 1f, size.y);
-        MeshFilter mf = go.AddComponent<MeshFilter>();
-        mf.sharedMesh = GetFlatPatchMesh();
-        MeshRenderer r = go.AddComponent<MeshRenderer>();
-        if (mat != null) r.material = mat;
-        r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        r.receiveShadows = true;
-        return go;
     }
 
     private GameObject Sphere(string name, Vector3 pos, Vector3 scale, Material mat, Transform parent)
@@ -1333,83 +1270,47 @@ public class VillageBuilder : MonoBehaviour
     private void BuildGround()
     {
         GameObject ground = GameObject.Find("Ground");
-        if (ground != null)
+        Renderer groundRenderer = (ground != null) ? ground.GetComponent<Renderer>() : null;
+
+        // ROUND 3 (PHONE-VIDEO 2026-11-09) — NO ground patch objects at
+        // all. Round 1 replaced the grey cylinder discs with textured
+        // flat fans (FlatPatch) and the parent STILL sees big flat ovals
+        // in CI shot-07/shot-10: the 9 m cobble disc (hard curved rim,
+        // uniform grey-beige), the dark-brown DirtPath / GroundPatch
+        // ovals (bottom-centre + bottom-right), the grey disc by the
+        // well. A perfect 24-segment circle with a hard 1-texel rim
+        // reads as an oval at ANY height above the ground — re-tinting
+        // or shrinking it cannot fix the shape. So every patch object
+        // is DELETED (DirtPath, DirtPathEW, ChowkCobble, GrassPatch,
+        // GroundPatch) and the WetSheen boxes go too (hard-edged
+        // translucent strips). ALL ground variation now lives IN the
+        // ground plane's own texture: BuildGroundMacroTexture() bakes
+        // the wet lanes, the cobbled chowk and the leaf / withered-grass
+        // blotches into one 1024 canvas with smoothstep-feathered
+        // edges, tiled 7x7 over the plane — the village sits inside a
+        // single tile, so nothing repeats or seams where the camera
+        // looks. If generation fails for any reason the plain 200x PBR
+        // mud stays (still no ovals).
+        // (The macro texture is baked into matGround BEFORE it is handed
+        // to the renderer: Renderer.material copies on access, so mutating
+        // matGround after the hand-off would not reach the ground.)
+        if (groundRenderer != null && matGround != null)
         {
-            Renderer r = ground.GetComponent<Renderer>();
-            if (r != null && matGround != null)
+            try
             {
-                r.material = matGround;
+                Texture2D macro = BuildGroundMacroTexture(groundRenderer);
+                if (macro != null)
+                {
+                    matGround.mainTexture = macro;
+                    matGround.mainTextureScale = new Vector2(7f, 7f);
+                    Debug.Log("[Village] Ground macro texture applied (7x7, wet lanes + chowk + blotches baked in)");
+                }
             }
-        }
-
-        // Dirt path patches along the main lane (worn ground, darker mud).
-        // Phase 2: ALL patches use the mud material now. The old code
-        // alternated mud / ground-mud, but the two materials tile at
-        // different rates (mud 3x, ground 200x), so the lane read as a
-        // checkerboard of flat rectangles instead of one worn track.
-        // PILOT: wet lanes — darkened mud (the reference road is wet,
-        // darker + shinier than the dry ground around it).
-        // PHONE-VIDEO 2026-11-09: the lane is TEXTURED wet mud now — the
-        // R3 flat-colour discs are gone (they read as pale grey floating
-        // plates on the phone, frames 22s/37s, and in CI). Each lane patch
-        // gets its OWN PBR clone tiled to its size (tile = patch / 2.5 m,
-        // the ground's tile size) so the mud keeps the ground's texel
-        // density. FlatPatch (no rim, ~1 cm above the ground) replaces
-        // Disc; the two patches inside the chowk (|z| < 5) are skipped —
-        // the cobble covers the centre, and overlapping patches z-fight.
-        Material dirtBase = (matMudWet != null) ? matMudWet
-            : (matMudDry != null) ? matMudDry : matGround;
-        for (int i = 0; i < 6; i++)
-        {
-            float z = -10f + i * 4f;
-            if (Mathf.Abs(z) < 5f) continue;
-            float w = 2.4f + ((i % 3) - 1) * 0.35f;
-            float l = 3.4f + ((i % 2) * 0.5f);
-            float x = ((i % 3) - 1) * 0.3f;
-            Material dirt = CloneTiledMaterial(dirtBase, Mathf.Max(w, l) / 2.5f);
-            if (dirt == null) continue;
-            GameObject patch = FlatPatch("DirtPath", new Vector3(x, -0.038f, z), new Vector2(w, l), dirt, villageRoot);
-            patch.transform.rotation = Quaternion.Euler(0f, ((i * 7) % 13) - 6f, 0f);
-        }
-
-        // Fix-push P2-17: east-west dirt patches across the lane at z ~ 7
-        // (same dirt material / patch style as the north-south lane above).
-        // Lighting pass: same variation treatment as the main lane.
-        for (int i = 0; i < 5; i++)
-        {
-            float x = -8f + i * 4f;
-            float w = 3.4f + ((i % 2) * 0.5f);
-            float l = 2.4f + ((i % 3) - 1) * 0.35f;
-            float z = 7f + ((i % 3) - 1) * 0.3f;
-            Material dirtEW = CloneTiledMaterial(dirtBase, Mathf.Max(w, l) / 2.5f);
-            if (dirtEW == null) continue;
-            GameObject patchEW = FlatPatch("DirtPathEW", new Vector3(x, -0.038f, z), new Vector2(w, l), dirtEW, villageRoot);
-            patchEW.transform.rotation = Quaternion.Euler(0f, ((i * 11) % 13) - 6f, 0f);
-        }
-
-        // Phase 2 wet look (new night + day references, 2026-11-08): the
-        // target is a WET village road — puddles reflecting sky, lamp and
-        // moon all down the lane — not flat dry mud. Two parts:
-        // (a) a faint glossy "wet sheen" strip over each lane: a thin
-        // transparent dark layer, very high smoothness, so the sun / lamp
-        // specular streaks along the road instead of the lane reading
-        // matte. Alpha is deliberately low (0.13) — it must glint, not
-        // paint the lane black.
-        // (b) real puddles (below): transparent sky-tinted water discs,
-        // smoothness 1.0 — the old opaque dark discs read as black holes,
-        // so they are gone.
-        // PILOT: the sheen was near-black (0.05,0.06,0.09) — it read as
-        // dirty strips; now a pale sky tint so it glints instead of
-        // darkening the lane.
-        Material sheenMat = MakeTransparent("WetSheen", new Color(0.42f, 0.50f, 0.58f, 0.10f));
-        if (sheenMat != null)
-        {
-            sheenMat.SetFloat("_Smoothness", 1f);
-            sheenMat.SetFloat("_Glossiness", 1f);
-            GameObject sheenNS = Box("WetSheenNS", new Vector3(0f, 0.038f, 2f), new Vector3(2.6f, 0.01f, 24f), sheenMat, villageRoot);
-            Destroy(sheenNS.GetComponent<Collider>());
-            GameObject sheenEW = Box("WetSheenEW", new Vector3(0f, 0.038f, 7f), new Vector3(20f, 0.01f, 2.6f), sheenMat, villageRoot);
-            Destroy(sheenEW.GetComponent<Collider>());
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[Village] Ground macro texture failed, keeping plain PBR mud — " + e.Message);
+            }
+            groundRenderer.material = matGround;
         }
 
         // PUDDLES — REMOVED (OVERNIGHT R3). Three rounds of transparent
@@ -1417,55 +1318,189 @@ public class VillageBuilder : MonoBehaviour
         // as water in either renderer: dark stain ovals in the CI render,
         // pale/white ovals in the emulator — in both cases they read as
         // bugs, not standing water, even with the reflection probe in the
-        // scene. The wet look stays via the WetSheen strips above + the
-        // darkened mud lanes. Audit 1.4 stays FAIL (no standing water) —
-        // honest, and the lane no longer carries fake-water artefacts.
+        // scene. The wet look now lives in the ground macro texture above
+        // (darkened wet-lane bands baked into the plane, not objects).
         // MakeWaterMaterial() is kept unused for a future real-water pass.
+    }
 
-        // Phase 4: cobbled chowk circle around the village centre.
-        // PHONE-VIDEO 2026-11-09: the chowk is a flat patch now — the 9 m
-        // cylinder's rim was the big pale disc in the phone frames and in
-        // CI. Cobble clone tiled to the disc (9 m / 1.5 m per tile = 6,
-        // the density the cylinder had); it sits 5 mm above the ground
-        // so it never z-fights the lane patches.
-        if (matCobble != null)
+    // ROUND 3 (2026-11-09): bake ALL ground variation into the ground
+    // plane's own albedo texture — wet lanes, cobbled chowk, leaf litter
+    // and withered-grass blotches — so no patch object exists to read as
+    // an oval. Returns null (caller keeps the plain PBR mud) if any
+    // source texture is missing or not CPU-readable.
+    // Layout: the canvas is ONE material tile; the material tiles 7x7
+    // over the ~500 m plane (odd count, so the village centre falls
+    // INSIDE a tile, never on a seam). One tile is ~71 m, so the whole
+    // village (r ~20 m) sits in the middle of the canvas and the pattern
+    // only repeats ~70 m out, past the camera's view. The mud photo is
+    // sampled 28x across the canvas (2.5 m/tile, its real scale); lane /
+    // chowk / blotch edges are smoothstep-feathered, never hard. The
+    // world<->canvas mapping is derived from the ground renderer's
+    // world bounds, not from assumed numbers. Cost: ~1M bilinear
+    // samples, once, at build time; the CPU copy is freed after Apply.
+    // The PBR normal / metal-smooth / AO maps stay at their 200x tiling
+    // (2.5 m/tile, the mud's real scale) — fine grain over the macro
+    // albedo, no re-tiling needed.
+    private Texture2D BuildGroundMacroTexture(Renderer groundRenderer)
+    {
+        Texture2D mud = LoadTex("brown_mud_dry_diff_1k");
+        if (mud == null || !mud.isReadable)
         {
-            Material chowkMat = CloneTiledMaterial(matCobble, 6f);
-            FlatPatch("ChowkCobble", new Vector3(0f, -0.045f, 0f), new Vector2(9f, 9f), chowkMat, villageRoot);
+            Debug.LogWarning("[Village] Ground macro texture skipped — mud texture missing/unreadable");
+            return null;
         }
+        Texture2D leaves = LoadTex("brown_mud_leaves_01_diff_1k");
+        Texture2D grass = LoadTex("withered_grass_diff_1k");
+        Texture2D cobble = LoadTex("cobblestone_floor_04_diff_1k");
+        if (leaves != null && !leaves.isReadable) leaves = null;
+        if (grass != null && !grass.isReadable) grass = null;
+        if (cobble != null && !cobble.isReadable) cobble = null;
 
-        // Grass patches near the field edge — FLAT textured patches, not
-        // the old vertical green boxes (they read as green dice).
-        // Withered-grass photo texture, varied rotation/scale.
-        for (int i = 0; i < 16; i++)
+        Bounds b = groundRenderer.bounds;
+        if (b.size.x < 300f || b.size.z < 300f)
         {
-            float x = 4f + (i % 8) * 1.4f;
-            float z = 12.5f + (i / 8) * 1.2f + ((i % 3) * 0.4f);
-            Material gmBase = (matWitheredGrass != null) ? matWitheredGrass : matGrass;
-            float pw = 1.1f + (i % 3) * 0.3f;
-            float pl = 0.9f + (i % 2) * 0.4f;
-            // PHONE-VIDEO 2026-11-09: flat patch, own PBR clone tiled to
-            // its size (the shared 1x1 material stretched one tile over
-            // every tuft). Sits 6 mm above the ground patches so the two
-            // never z-fight where they overlap.
-            Material gm = CloneTiledMaterial(gmBase, Mathf.Max(pw, pl) / 2.5f);
-            if (gm == null) continue;
-            GameObject tuft = FlatPatch("GrassPatch", new Vector3(x, -0.034f, z), new Vector2(pw, pl), gm, villageRoot);
-            tuft.transform.rotation = Quaternion.Euler(0f, i * 23f, 0f);
+            Debug.LogWarning("[Village] Ground macro texture skipped — ground plane too small (" + b.size.x + "x" + b.size.z + ")");
+            return null;
         }
+        const int S = 1024;
+        const float Tiling = 7f;
+        const float MudRepeats = 28f;
+        float tileU = Mathf.Floor(Tiling * 0.5f); // central tile index (3 of 0..6)
+        float minX = b.min.x, sizeX = b.size.x, minZ = b.min.z, sizeZ = b.size.z;
 
-        // Scattered ground variation across the village: leaf litter,
-        // withered grass and dry-mud patches break up the flat brown.
-        // Phase 2: each patch gets its OWN material clone tiled to its
-        // size (tile = patch size / 2.5 m, the ground's tile size). The
-        // old code shared one material at 1x1 tiling across every patch,
-        // so a 3.7 m patch stretched one texture tile over 3.7 m and read
-        // as a flat coloured rectangle — the blotchy slabs in the Phase 1
-        // screenshot. Patches are also smaller now (1.8-2.8 m) and sit
-        // lower (y=0.04) so their edges stop reading as raised tiles.
-        // Kept outside the chowk disc (r ~5) and off the dirt lanes so
-        // nothing z-fights the path/chowk patches.
-        Vector3[] patchSpots = new Vector3[]
+        Color[] px = new Color[S * S];
+        // (1) Base: mud photo, wrapped, 28 repeats per tile.
+        for (int py = 0; py < S; py++)
+        {
+            float v = (py + 0.5f) / S * MudRepeats;
+            for (int pxx = 0; pxx < S; pxx++)
+            {
+                float u = (pxx + 0.5f) / S * MudRepeats;
+                px[py * S + pxx] = SampleWrapped(mud, u, v);
+            }
+        }
+        // (2) Wet lanes — darker wet mud with its own grain (mud sampled
+        // at an offset, tinted like the old matMudWet 0.55/0.50/0.45).
+        // NS lane: |x| <= 1.3 m full, feathered to 2.2 m; z -12..12.
+        // EW lane: |z - 7| <= 1.3 m full, feathered to 2.2 m; x -10..10.
+        StampWetLane(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, mud, true);
+        StampWetLane(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, mud, false);
+        // (3) Cobbled chowk — cobble photo, stones ~0.5 m (sampled at
+        // 1.5 m/tile like the old 6x chowk material), full inside r 3.6 m,
+        // feathered to r 4.5 m. Painted AFTER the lanes, so paving wins
+        // where they cross at the centre.
+        if (cobble != null) StampChowk(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, cobble);
+        // (4) Leaf litter / withered-grass blotches at the old patch
+        // spots (same positions the GroundPatch discs used) + the grass
+        // tufts by the field edge — soft ellipses, never circles with a
+        // hard rim: full strength inside 65% of the radius, feathered
+        // out to the rim.
+        StampBlotches(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, mud, leaves, grass);
+
+        Texture2D tex = new Texture2D(S, S, TextureFormat.RGBA32, true, false);
+        tex.name = "GroundMacroMud";
+        tex.filterMode = FilterMode.Bilinear;
+        tex.wrapMode = TextureWrapMode.Repeat;
+        tex.anisoLevel = 4;
+        tex.SetPixels(px);
+        tex.Apply(true, true);
+        return tex;
+    }
+
+    // Smoothstep between two edges (0 below a, 1 above b).
+    private static float Smooth01(float a, float b, float x)
+    {
+        float t = Mathf.Clamp01((x - a) / (b - a));
+        return t * t * (3f - 2f * t);
+    }
+
+    // Bilinear sample with manual repeat-wrap (GetPixelBilinear alone
+    // is not relied on to wrap).
+    private static Color SampleWrapped(Texture2D t, float u, float v)
+    {
+        return t.GetPixelBilinear(Mathf.Repeat(u, 1f), Mathf.Repeat(v, 1f));
+    }
+
+    // World coordinate -> canvas pixel (canvas = the central material tile).
+    private static float WorldToCanvas(float world, float min, float size, float tiling, float tileU, int s)
+    {
+        return ((world - min) / size * tiling - tileU) * s;
+    }
+
+    // Canvas pixel -> world coordinate.
+    private static float CanvasToWorld(float p, float min, float size, float tiling, float tileU, int s)
+    {
+        return min + ((tileU + p / s) / tiling) * size;
+    }
+
+    // One wet-lane band baked into the canvas. northSouth: the main lane
+    // along x = 0; otherwise the east-west lane along z = 7.
+    private void StampWetLane(Color[] px, int s, float minX, float sizeX, float minZ, float sizeZ,
+        float tiling, float tileU, Texture2D mud, bool northSouth)
+    {
+        float x0 = northSouth ? -2.2f : -10.9f;
+        float x1 = northSouth ? 2.2f : 10.9f;
+        float z0 = northSouth ? -12.9f : 4.8f;
+        float z1 = northSouth ? 12.9f : 9.2f;
+        int px0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(x0, minX, sizeX, tiling, tileU, s)));
+        int px1 = Mathf.Min(s - 1, Mathf.CeilToInt(WorldToCanvas(x1, minX, sizeX, tiling, tileU, s)));
+        int py0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(z0, minZ, sizeZ, tiling, tileU, s)));
+        int py1 = Mathf.Min(s - 1, Mathf.CeilToInt(WorldToCanvas(z1, minZ, sizeZ, tiling, tileU, s)));
+        for (int py = py0; py <= py1; py++)
+        {
+            float wz = CanvasToWorld(py + 0.5f, minZ, sizeZ, tiling, tileU, s);
+            float maskZ = northSouth
+                ? 1f - Smooth01(12f, 12.9f, Mathf.Abs(wz))
+                : 1f - Smooth01(1.3f, 2.2f, Mathf.Abs(wz - 7f));
+            if (maskZ <= 0f) continue;
+            for (int pxx = px0; pxx <= px1; pxx++)
+            {
+                float wx = CanvasToWorld(pxx + 0.5f, minX, sizeX, tiling, tileU, s);
+                float maskX = northSouth
+                    ? 1f - Smooth01(1.3f, 2.2f, Mathf.Abs(wx))
+                    : 1f - Smooth01(10f, 10.9f, Mathf.Abs(wx));
+                float mask = maskX * maskZ;
+                if (mask <= 0f) continue;
+                Color wet = SampleWrapped(mud, (pxx + 0.5f) / s * 28f + 0.37f, (py + 0.5f) / s * 28f + 0.61f);
+                wet = new Color(wet.r * 0.55f, wet.g * 0.50f, wet.b * 0.45f, 1f);
+                int idx = py * s + pxx;
+                px[idx] = Color.Lerp(px[idx], wet, mask * 0.85f);
+            }
+        }
+    }
+
+    // Cobbled chowk disc baked into the canvas (feathered rim, no edge).
+    private void StampChowk(Color[] px, int s, float minX, float sizeX, float minZ, float sizeZ,
+        float tiling, float tileU, Texture2D cobble)
+    {
+        int px0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(-4.6f, minX, sizeX, tiling, tileU, s)));
+        int px1 = Mathf.Min(s - 1, Mathf.CeilToInt(WorldToCanvas(4.6f, minX, sizeX, tiling, tileU, s)));
+        int py0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(-4.6f, minZ, sizeZ, tiling, tileU, s)));
+        int py1 = Mathf.Min(s - 1, Mathf.CeilToInt(WorldToCanvas(4.6f, minZ, sizeZ, tiling, tileU, s)));
+        for (int py = py0; py <= py1; py++)
+        {
+            float wz = CanvasToWorld(py + 0.5f, minZ, sizeZ, tiling, tileU, s);
+            for (int pxx = px0; pxx <= px1; pxx++)
+            {
+                float wx = CanvasToWorld(pxx + 0.5f, minX, sizeX, tiling, tileU, s);
+                float r = Mathf.Sqrt(wx * wx + wz * wz);
+                if (r >= 4.5f) continue;
+                float mask = 1f - Smooth01(3.6f, 4.5f, r);
+                Color c = SampleWrapped(cobble, wx / 1.5f, wz / 1.5f);
+                c = new Color(c.r * 0.72f, c.g * 0.71f, c.b * 0.68f, 1f);
+                int idx = py * s + pxx;
+                px[idx] = Color.Lerp(px[idx], c, mask * 0.9f);
+            }
+        }
+    }
+
+    // Leaf litter / withered-grass blotches at the old GroundPatch spots
+    // plus the grass tufts by the field edge (same positions/sizes the
+    // deleted discs used — the variation stays, the shape goes).
+    private void StampBlotches(Color[] px, int s, float minX, float sizeX, float minZ, float sizeZ,
+        float tiling, float tileU, Texture2D mud, Texture2D leaves, Texture2D grass)
+    {
+        Vector3[] spots = new Vector3[]
         {
             new Vector3(-12f, 0f, -6f), new Vector3(12f, 0f, -10f),
             new Vector3(-14f, 0f, 4f), new Vector3(14f, 0f, 6f),
@@ -1473,16 +1508,11 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(-10f, 0f, 12f), new Vector3(16f, 0f, -6f),
             new Vector3(-16f, 0f, -10f), new Vector3(10f, 0f, -14f),
             new Vector3(-4f, 0f, 16f), new Vector3(18f, 0f, 10f),
-            // Second ring — the big empty stretches (north lane sides,
-            // east/west edges, south field edge).
             new Vector3(-8f, 0f, -12f), new Vector3(8f, 0f, -12f),
             new Vector3(-15f, 0f, -4f), new Vector3(15f, 0f, 4f),
             new Vector3(-10f, 0f, 18f), new Vector3(4f, 0f, 18f),
             new Vector3(14f, 0f, 16f), new Vector3(18f, 0f, -12f),
             new Vector3(-18f, 0f, 8f), new Vector3(6f, 0f, -8f),
-            // Third ring — foreground/south and mid-village bare stretches,
-            // where the main camera looks (kept off the dirt lanes z=7 / x=0
-            // and outside the chowk disc r~5).
             new Vector3(-4f, 0f, 12f), new Vector3(4f, 0f, 12f),
             new Vector3(-10f, 0f, 14f), new Vector3(10f, 0f, 14f),
             new Vector3(-14f, 0f, -2f), new Vector3(14f, 0f, -2f),
@@ -1490,25 +1520,55 @@ public class VillageBuilder : MonoBehaviour
             new Vector3(12f, 0f, 10f), new Vector3(-12f, 0f, 10f),
             new Vector3(2f, 0f, 18f), new Vector3(18f, 0f, -4f),
         };
-        for (int i = 0; i < patchSpots.Length; i++)
+        for (int i = 0; i < spots.Length; i++)
         {
-            Material pm = (i % 3 == 0 && matLeaves != null) ? matLeaves
-                : (i % 3 == 1 && matWitheredGrass != null) ? matWitheredGrass
-                : (matMudDry != null ? matMudDry : matGround);
-            float s = 1.8f + (i % 4) * 0.33f;
-            float t = s / 2.5f;
-            Material patchMat = CloneTiledMaterial(pm, t);
-            // PILOT ROUND 2: full-strength patch textures read as pale
-            // slabs with hard rectangular edges — darken toward the
-            // ground tone so the edges blend.
-            if (patchMat != null) patchMat.color = patchMat.color * 0.8f;
-            // PHONE-VIDEO 2026-11-09: FlatPatch, not Disc — the cylinder
-            // rim was the visible plate edge in the phone frames. Same
-            // per-patch clone + 0.8x darken, now 1 cm above the ground
-            // (was 0.04 m up on a 0.04 m thick plate).
-            GameObject patch = FlatPatch("GroundPatch", new Vector3(patchSpots[i].x, -0.04f, patchSpots[i].z),
-                new Vector2(s, s * (0.8f + (i % 3) * 0.15f)), patchMat, villageRoot);
-            patch.transform.rotation = Quaternion.Euler(0f, (i * 37) % 180f, 0f);
+            Texture2D src = (i % 3 == 0) ? leaves : (i % 3 == 1) ? grass : mud;
+            Color tint = (i % 3 == 2) ? new Color(0.8f, 0.8f, 0.8f, 1f) : Color.white;
+            if (src == null) { src = mud; tint = new Color(0.8f, 0.8f, 0.8f, 1f); }
+            float r = (1.8f + (i % 4) * 0.33f) * 0.5f;
+            float rz = r * (0.8f + (i % 3) * 0.15f);
+            StampBlotch(px, s, minX, sizeX, minZ, sizeZ, tiling, tileU, src, tint,
+                spots[i].x, spots[i].z, r, rz, 0.55f);
+        }
+        // Grass tufts by the field edge (old GrassPatch positions).
+        for (int i = 0; i < 16; i++)
+        {
+            float x = 4f + (i % 8) * 1.4f;
+            float z = 12.5f + (i / 8) * 1.2f + ((i % 3) * 0.4f);
+            float pw = 1.1f + (i % 3) * 0.3f;
+            float pl = 0.9f + (i % 2) * 0.4f;
+            Texture2D src = (grass != null) ? grass : mud;
+            Color tint = (grass != null) ? Color.white : new Color(0.8f, 0.8f, 0.8f, 1f);
+            StampBlotch(px, s, minX, sizeX, minZ, sizeZ, tiling, tileU, src, tint,
+                x, z, pw * 0.5f, pl * 0.5f, 0.55f);
+        }
+    }
+
+    // One soft elliptical blotch: full strength inside 65% of the
+    // radius, feathered out to the rim — no hard edge, no circle outline.
+    private void StampBlotch(Color[] px, int s, float minX, float sizeX, float minZ, float sizeZ,
+        float tiling, float tileU, Texture2D src, Color tint, float cx, float cz, float rx, float rz, float strength)
+    {
+        int px0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(cx - rx, minX, sizeX, tiling, tileU, s)));
+        int px1 = Mathf.Min(s - 1, Mathf.CeilToInt(WorldToCanvas(cx + rx, minX, sizeX, tiling, tileU, s)));
+        int py0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(cz - rz, minZ, sizeZ, tiling, tileU, s)));
+        int py1 = Mathf.Min(s - 1, Mathf.CeilToInt(WorldToCanvas(cz + rz, minZ, sizeZ, tiling, tileU, s)));
+        for (int py = py0; py <= py1; py++)
+        {
+            float wz = CanvasToWorld(py + 0.5f, minZ, sizeZ, tiling, tileU, s);
+            for (int pxx = px0; pxx <= px1; pxx++)
+            {
+                float wx = CanvasToWorld(pxx + 0.5f, minX, sizeX, tiling, tileU, s);
+                float ex = (wx - cx) / rx;
+                float ez = (wz - cz) / rz;
+                float d = Mathf.Sqrt(ex * ex + ez * ez);
+                if (d >= 1f) continue;
+                float mask = 1f - Smooth01(0.65f, 1f, d);
+                Color c = SampleWrapped(src, wx / 2.5f, wz / 2.5f);
+                c = new Color(c.r * tint.r, c.g * tint.g, c.b * tint.b, 1f);
+                int idx = py * s + pxx;
+                px[idx] = Color.Lerp(px[idx], c, mask * strength);
+            }
         }
     }
 
@@ -1517,6 +1577,8 @@ public class VillageBuilder : MonoBehaviour
     // on a 2 m patch as on the 500 m ground plane. All four PBR map scales
     // are set together — setting only the albedo scale would leave the
     // normal/AO maps stretched differently and the patch would shade wrong.
+    // ROUND 3 (2026-11-09): retained unused — the ground patches it served
+    // are deleted; ground variation is baked into the plane's texture now.
     private static Material CloneTiledMaterial(Material src, float tiling)
     {
         if (src == null) return null;
