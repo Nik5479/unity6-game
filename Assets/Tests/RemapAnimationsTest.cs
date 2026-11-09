@@ -44,9 +44,18 @@ public class RemapAnimationsTest
     // and the whole body snapped back every cycle. In-place clips have
     // near-constant Hips x/z (only the vertical bob remains, which is
     // the y curve and is intentionally kept).
+    // NOTE: AnimationClip has no GetCurve — curve inspection is
+    // UnityEditor.AnimationUtility.GetEditorCurve, which only exists in
+    // the Editor. CI PlayMode tests run inside the Editor, so the real
+    // check runs there. The Tests assembly also compiles into the
+    // Android player build (no platform exclusion), where the check is
+    // skipped — the player build only compiles the tests, never runs them.
     [Test]
     public void ClipsAreInPlace()
     {
+#if !UNITY_EDITOR
+        Assert.Inconclusive("Curve inspection needs the Editor; skipped in player build.");
+#else
         const string hipsPath = "Sketchfab_model/803b21a9e5ca42e2adaea3abf262f423.fbx/Object_2/RootNode/AvatarRoot/Object_5/_rootJoint/Hips_01";
         foreach (string n in new string[] { "NileshIdle", "NileshWalk", "NileshRun", "NileshSprint" })
         {
@@ -54,7 +63,8 @@ public class RemapAnimationsTest
             Assert.IsNotNull(clip, "Committed clip missing: " + n);
             foreach (string prop in new string[] { "m_LocalPosition.x", "m_LocalPosition.z" })
             {
-                AnimationCurve curve = clip.GetCurve(hipsPath, typeof(Transform), prop);
+                AnimationCurve curve = UnityEditor.AnimationUtility.GetEditorCurve(
+                    clip, UnityEditor.EditorCurveBinding.FloatCurve(hipsPath, typeof(Transform), prop));
                 Assert.IsNotNull(curve, n + ": no Hips " + prop + " curve — rig path changed?");
                 float lo = float.MaxValue, hi = float.MinValue;
                 foreach (Keyframe k in curve.keys)
@@ -66,5 +76,6 @@ public class RemapAnimationsTest
                 Assert.Less(hi - lo, 0.01f, n + ": Hips " + prop + " still carries root motion (range " + (hi - lo).ToString("F3") + " m) — clip is not in-place");
             }
         }
+#endif
     }
 }
