@@ -2091,6 +2091,10 @@ public class VillageBuilder : MonoBehaviour
             // stone slab so the interior reads as a room, not dirt, +
             // a dim warm diya light above the diya.
             Box("House_Player_Floor", playerCenter + new Vector3(0f, 0f, 0f), new Vector3(w, 0.06f, d), matStone, villageRoot);
+            // ROUND 5c: the floor slab top (0.03 m) is a walkable
+            // surface so the feet rest on the floor, not 3 cm under it.
+            VillageColliders.RegisterWalkable(playerCenter.x, playerCenter.z,
+                Mathf.Max(w, d) / 2f, 0.03f);
             GameObject diyaLightGO = new GameObject("House_Player_DiyaLight");
             diyaLightGO.transform.SetParent(villageRoot, false);
             diyaLightGO.transform.position = playerCenter + new Vector3(0f, 1.2f, -d / 2f + 0.5f);
@@ -2256,6 +2260,9 @@ public class VillageBuilder : MonoBehaviour
 
         // Floor slab (stone plinth).
         Box(name + "_Floor", center + new Vector3(0f, 0.06f, 0f), new Vector3(w + 0.4f, 0.12f, d + 0.4f), matStone, root);
+        // ROUND 5c: the floor slab top (0.12 m) is a walkable surface.
+        VillageColliders.RegisterWalkable(center.x, center.z,
+            Mathf.Max(w + 0.4f, d + 0.4f) / 2f, 0.12f);
 
         // Back wall (+/-X opposite the door) and side walls (+/-Z).
         float doorX = (doorSide == DoorSide.East) ? (w / 2f) : (-w / 2f);
@@ -3633,6 +3640,144 @@ public class VillageBuilder : MonoBehaviour
     // player cannot walk through it. The shivling stays OUT (defective).
     // ------------------------------------------------------------------
 
+    // ROUND 5c (feet clipping): the temple's stepped plinth must be
+    // walkable. The step profile is derived from the ACTUAL rendered
+    // plinth mesh (Object_25), so the registered tops match the visible
+    // geometry exactly regardless of the .glb normalisation scale: the
+    // mesh vertices are transformed to world space, grouped by height,
+    // and each height level becomes a nested walkable square (centre =
+    // temple position, half-width = widest vertex at that height). The
+    // shrine itself stays blocked (lower + middle AABB boxes) so the
+    // player walks the plinth but not through the shrine walls. The
+    // gateway pillars are NOT blocked (their positions are not
+    // derivable from the .glb bounds) — minor known gap: the player
+    // can walk through a gateway pillar. The temple platform top is
+    // registered as walkable too (its ring is narrow and mostly blocked
+    // by the shrine boxes, so the player rarely reaches it, but the
+    // ground height there is correct).
+    // Fallback (Object_25 not found, e.g. renamed): the tier profile
+    // derived from the .glb on 2026-11-10 (ByHeight 10, 12 tiers) —
+    // tops 0.343/0.427/0.512/0.596/0.681/0.766/0.850/0.935/1.019/1.104/
+    // 1.189/1.273 m, half-widths 4.949 down to 2.771 m. Approximate;
+    // the runtime mesh path is authoritative.
+    private static void RegisterTempleWalkables(GameObject temple)
+    {
+        if (temple == null) return;
+        Vector3 tp = temple.transform.position; // (2, 0, -17)
+        bool foundPlinth = false;
+
+        Transform plinth = FindChildRecursive(temple.transform, "Object_25");
+        if (plinth != null)
+        {
+            Mesh mesh = null;
+            Renderer plinthR = plinth.GetComponent<Renderer>();
+            if (plinthR is MeshRenderer)
+            {
+                MeshFilter mf = plinth.GetComponent<MeshFilter>();
+                if (mf != null) mesh = mf.sharedMesh;
+            }
+            else if (plinthR is SkinnedMeshRenderer)
+            {
+                mesh = ((SkinnedMeshRenderer)plinthR).sharedMesh;
+            }
+            if (mesh != null && plinthR != null)
+            {
+                // Group world-space vertices by height (2 cm buckets —
+                // the tiers are ~8.5 cm apart, so no two tiers merge)
+                // and take the widest vertex at each height as the
+                // tier's half-width (Chebyshev from the plinth centre).
+                Matrix4x4 m = plinthR.localToWorldMatrix;
+                var levels = new Dictionary<int, float>();
+                foreach (Vector3 v in mesh.vertices)
+                {
+                    Vector3 w = m.MultiplyPoint3x4(v);
+                    if (w.y < 0.02f) continue; // ground level, not a step
+                    int key = Mathf.RoundToInt(w.y / 0.02f);
+                    float half = Mathf.Max(Mathf.Abs(w.x - tp.x), Mathf.Abs(w.z - tp.z));
+                    float cur;
+                    if (!levels.TryGetValue(key, out cur) || half > cur)
+                        levels[key] = half;
+                }
+                foreach (var kv in levels)
+                {
+                    float top = kv.Key * 0.02f;
+                    if (top < 0.05f || kv.Value < 0.5f) continue;
+                    VillageColliders.RegisterWalkable(tp.x, tp.z, kv.Value, top);
+                }
+                foundPlinth = true;
+                Debug.Log("[Village] Temple plinth: registered " + levels.Count
+                    + " walkable tiers from Object_25 mesh");
+            }
+        }
+        if (!foundPlinth)
+        {
+            Debug.LogWarning("[Village] Temple plinth Object_25 not found — "
+                + "using hardcoded tier profile (approximate)");
+            float[] tops = { 0.343f, 0.427f, 0.512f, 0.596f, 0.681f, 0.766f,
+                0.850f, 0.935f, 1.019f, 1.104f, 1.189f, 1.273f };
+            float[] halves = { 4.949f, 4.750f, 4.552f, 4.354f, 4.156f, 3.958f,
+                3.760f, 3.563f, 3.365f, 3.167f, 2.969f, 2.771f };
+            for (int i = 0; i < tops.Length; i++)
+                VillageColliders.RegisterWalkable(tp.x, tp.z, halves[i], tops[i]);
+        }
+
+        // Temple platform top (Object_27): walkable square from its
+        // rendered bounds.
+        RegisterWalkableFromBounds(temple, "Object_27");
+        // Shrine blocking boxes (from rendered bounds; lower extended
+        // up so the player can never jump over the walls, upper kept
+        // at its real height so the player can walk under its overhang
+        // on the platform ring).
+        RegisterBlockFromBounds(temple, "Object_32", 10f); // lower walls
+        RegisterBlockFromBounds(temple, "Object_30", 10f); // middle tower
+        RegisterBlockFromBounds(temple, "Object_34", 0f);  // upper block
+    }
+
+    private static void RegisterWalkableFromBounds(GameObject root, string childName)
+    {
+        Transform t = FindChildRecursive(root.transform, childName);
+        if (t == null) return;
+        Bounds b = GetChildBounds(t);
+        if (b.size.x < 0.1f || b.size.z < 0.1f) return;
+        VillageColliders.RegisterWalkable(b.center.x, b.center.z,
+            Mathf.Max(b.size.x, b.size.z) / 2f, b.max.y);
+        Debug.Log("[Village] Walkable top: " + childName + " top "
+            + b.max.y.ToString("F2") + " m, half "
+            + (Mathf.Max(b.size.x, b.size.z) / 2f).ToString("F2") + " m");
+    }
+
+    private static void RegisterBlockFromBounds(GameObject root, string childName, float extendUpTo)
+    {
+        Transform t = FindChildRecursive(root.transform, childName);
+        if (t == null) return;
+        Bounds b = GetChildBounds(t);
+        if (b.size.x < 0.1f || b.size.y < 0.1f || b.size.z < 0.1f) return;
+        if (extendUpTo > b.max.y)
+            b.max = new Vector3(b.max.x, extendUpTo, b.max.z);
+        VillageColliders.Register(b);
+        Debug.Log("[Village] Shrine block: " + childName + " " + b.ToString("F2"));
+    }
+
+    private static Transform FindChildRecursive(Transform parent, string name)
+    {
+        foreach (Transform c in parent)
+        {
+            if (c.name == name) return c;
+            Transform found = FindChildRecursive(c, name);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static Bounds GetChildBounds(Transform t)
+    {
+        Renderer[] rs = t.GetComponentsInChildren<Renderer>();
+        if (rs.Length == 0) return new Bounds(t.position, Vector3.zero);
+        Bounds b = rs[0].bounds;
+        foreach (Renderer r in rs) b.Encapsulate(r.bounds);
+        return b;
+    }
+
     // Phase 4: every new real model. Each load is independent — one
     // failure is logged and skipped, never fatal. .gltf bundles (soil,
     // forest floor, lanterns) load from their subfolders under
@@ -3648,9 +3793,18 @@ public class VillageBuilder : MonoBehaviour
         // Nilesh looked as big as the temple. ByHeight 10 (low end of
         // the range — the model is wider than tall, so 10 m already
         // spans 13.7 m wide).
+        // ROUND 5c (feet clipping): was ColliderMode.FullBounds — the
+        // whole 10 m temple (including its stepped plinth) was one
+        // blocking box, so the player could never step onto the plinth
+        // at all, and the feet-sink bug was invisible to the collider
+        // system. Now None: RegisterTempleWalkables registers the
+        // shrine as blocking boxes and the plinth tiers as walkable
+        // tops, so the player walks UP the steps with his feet on the
+        // step surface.
         yield return LoadProp("hindu_temple_88_62er.glb", "Temple",
             new Vector3(2f, 0f, -17f), 0f, 10f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None,
+            g => RegisterTempleWalkables(g));
         // School landmark (south-west, clear of House_3 and the jungle ring).
         // Phase 1: a pakka school is 5 m tall (the old ByWidth 7 made it
         // 2.6 m — shorter than two Nileshes stacked).
