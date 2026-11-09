@@ -435,6 +435,32 @@ public class ScreenshotTest
         Assert.IsNotNull(shot9, "Screenshot 9 (Nilesh face) failed to render");
         Assert.IsTrue(File.Exists(shot9), "Screenshot 9 file missing: " + shot9);
 
+        // ROUND 5b, shot 14: Pujari close-up — the Round 5 photos caught
+        // him as a blank beige mannequin: his .glb carries two ~2.4 m
+        // cylinders (dhoti + orange pot) that swallow the whole avatar.
+        // FixPujari hides them; this shot proves the real man (face,
+        // outfit top, hair) renders instead of the capsule. Teleport him
+        // to his patrol centre, face him south (yaw 270) toward the
+        // camera, and freeze his routine for the frame.
+        GameObject pujari = GameObject.Find("Pujari");
+        Assert.IsNotNull(pujari, "Pujari not found for close-up shot");
+        Behaviour pujariRoutine = pujari.GetComponent("NpcRoutine") as Behaviour;
+        if (pujariRoutine != null) pujariRoutine.enabled = false;
+        pujari.transform.position = new Vector3(4.5f, 0f, -8.5f);
+        pujari.transform.rotation = Quaternion.Euler(0f, 270f, 0f);
+        Behaviour followP = cam.GetComponent("CameraFollow") as Behaviour;
+        if (followP != null) followP.enabled = false;
+        cam.transform.position = new Vector3(4.5f, 1.6f, -5.0f);
+        cam.transform.LookAt(new Vector3(4.5f, 1.3f, -8.5f));
+        yield return null;
+        string shot14 = RenderScreenshot(cam, "pujari.png", 1280, 720);
+        if (pujariRoutine != null) pujariRoutine.enabled = true;
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (followP != null) followP.enabled = true;
+        Assert.IsNotNull(shot14, "Screenshot 14 (Pujari) failed to render");
+        Assert.IsTrue(File.Exists(shot14), "Screenshot 14 file missing: " + shot14);
+
         // ROUND 4 follow-up, shot 13: House_2's front fence — the
         // spawn-area fence whose blue window showed through the planks
         // in the emulator shot-05 (House_2 atlas repainted wood-brown,

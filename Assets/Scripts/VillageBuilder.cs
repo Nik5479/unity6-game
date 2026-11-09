@@ -3113,6 +3113,22 @@ public class VillageBuilder : MonoBehaviour
             new System.Collections.Generic.HashSet<Material>();
         foreach (Renderer r in holder.GetComponentsInChildren<Renderer>())
         {
+            // ROUND 5b: the two static cylinders (Cylinder_Material.001
+            // dhoti + Cylinder_Material.002 orange pot) are ~2.4 m
+            // diameter tubes spanning Z 0.39..2.62 in model space — they
+            // swallow the whole Wolf3D avatar. Only the black hair tuft
+            // (top) and black footwear (bottom) poke out, so he reads as
+            // a blank beige mannequin in the photos. Tinting the tube
+            // (the old fix) only changed its colour. Hide both meshes;
+            // the avatar underneath (textured face / outfit top, hair,
+            // body, footwear) renders normally without them.
+            MeshFilter mf = r.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null && mf.sharedMesh.name.StartsWith("Cylinder_"))
+            {
+                r.enabled = false;
+                Debug.Log("[Village] Pujari cylinder hidden: " + mf.sharedMesh.name);
+                continue;
+            }
             foreach (Material m in r.sharedMaterials)
             {
                 if (m == null || !seen.Add(m)) continue;
