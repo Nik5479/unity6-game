@@ -56,6 +56,17 @@ public class PlayerController : MonoBehaviour
     private bool isGrounded = true;
     private const float kRadius = 0.45f;
 
+    // ROUND 5c (feet clipping): the temple plinth's first step is
+    // ~0.34 m tall and the top step ~1.27 m — a player standing on the
+    // steps must have his feet ON the step surface, not at terrain
+    // height (y=0). The controller is transform-based (no
+    // CharacterController / raycasts), so it samples the walkable-top
+    // registry (VillageColliders.GroundHeightAt) every frame. StepUp is
+    // the tallest single step the player can climb: 0.45 m covers the
+    // temple's 0.34 m first step with margin, and still blocks walls /
+    // the 1.43 m shrine platform from the ground.
+    public const float StepUp = 0.45f;
+
     void Update()
     {
         // ROUND 4 (loading): gate closed — no movement, no jump, no
@@ -72,6 +83,7 @@ public class PlayerController : MonoBehaviour
             speedSmooth = 0f;
             CurrentSpeed = 0f;
             ApplyGravity();
+            UpdateGrounding();
             return;
         }
 
@@ -141,10 +153,51 @@ public class PlayerController : MonoBehaviour
         }
 
         ApplyGravity();
+        UpdateGrounding();
     }
 
-    // Simple gravity, ground is at y = 0.5 (player centre). Extracted
-    // so the loading gate can keep it running while input is closed.
+    // ROUND 5c: sample the walkable-top registry and keep the feet on
+    // the surface under the player. Snap UP when the ground rose under
+    // him (teleport / step-up onto a step), snap DOWN for small drops
+    // (walking off a low step), and start FALLING when the ground fell
+    // away by more than a step (walked off a high ledge). The
+    // camera-collision test teleports the player onto the temple plinth
+    // — without this snap his feet stayed at terrain height and sank
+    // ~0.5 m into the steps. Only runs while grounded; a jump is
+    // governed by ApplyGravity.
+    private void UpdateGrounding()
+    {
+        if (!isGrounded) return;
+        Vector3 p = transform.position;
+        float feetY = p.y - 0.5f;
+        float ground = VillageColliders.GroundHeightAt(p.x, p.z);
+        if (ground > feetY + 0.001f)
+        {
+            // Ground rose under him (teleport onto a step, or stepped
+            // up): snap the feet onto it.
+            p.y = ground + 0.5f;
+            transform.position = p;
+        }
+        else if (feetY - ground > StepUp)
+        {
+            // Ground fell away by more than a step (walked off a high
+            // ledge): start falling.
+            isGrounded = false;
+            yVelocity = 0f;
+        }
+        else if (feetY > ground + 0.001f)
+        {
+            // Small drop (walked off a low step): snap down.
+            p.y = ground + 0.5f;
+            transform.position = p;
+        }
+    }
+
+    // Simple gravity, ground is the sampled walkable-top height under
+    // the player (ROUND 5c: was hardcoded y = 0.5 centre, so a player
+    // who jumped on the temple steps landed THROUGH them at terrain
+    // height). Extracted so the loading gate can keep it running while
+    // input is closed.
     private void ApplyGravity()
     {
         if (!isGrounded)
@@ -152,9 +205,10 @@ public class PlayerController : MonoBehaviour
             yVelocity -= 20f * Time.deltaTime;
             Vector3 p = transform.position;
             p.y += yVelocity * Time.deltaTime;
-            if (p.y <= 0.5f)
+            float ground = VillageColliders.GroundHeightAt(p.x, p.z);
+            if (p.y <= ground + 0.5f)
             {
-                p.y = 0.5f;
+                p.y = ground + 0.5f;
                 yVelocity = 0f;
                 isGrounded = true;
             }
@@ -179,22 +233,29 @@ public class PlayerController : MonoBehaviour
     }
 
     // Move with simple AABB collision: try full step, then X-only, then Z-only.
+    // ROUND 5c: never step UP onto a surface higher than one step above
+    // the feet (a wall / the shrine platform from the ground). The
+    // grounding snap handles legitimate steps (<= StepUp).
     private void TryMove(ref Vector3 p, Vector3 step)
     {
+        float feetY = p.y - 0.5f;
         Vector3 full = new Vector3(p.x + step.x, p.y, p.z + step.z);
-        if (VillageColliders.CanMoveTo(full, kRadius))
+        if (VillageColliders.GroundHeightAt(full.x, full.z) <= feetY + StepUp
+            && VillageColliders.CanMoveTo(full, kRadius))
         {
             p = full;
             return;
         }
         Vector3 onlyX = new Vector3(p.x + step.x, p.y, p.z);
-        if (VillageColliders.CanMoveTo(onlyX, kRadius))
+        if (VillageColliders.GroundHeightAt(onlyX.x, onlyX.z) <= feetY + StepUp
+            && VillageColliders.CanMoveTo(onlyX, kRadius))
         {
             p = onlyX;
             return;
         }
         Vector3 onlyZ = new Vector3(p.x, p.y, p.z + step.z);
-        if (VillageColliders.CanMoveTo(onlyZ, kRadius))
+        if (VillageColliders.GroundHeightAt(onlyZ.x, onlyZ.z) <= feetY + StepUp
+            && VillageColliders.CanMoveTo(onlyZ, kRadius))
         {
             p = onlyZ;
         }

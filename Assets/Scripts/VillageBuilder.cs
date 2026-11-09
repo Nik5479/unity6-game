@@ -11,6 +11,38 @@ public static class VillageColliders
 {
     private static readonly List<Bounds> s_blocks = new List<Bounds>();
 
+    // ROUND 5c (feet clipping, 2026-11-10): walkable raised surfaces.
+    // The player controller grounds to the terrain plane (y=0) and never
+    // knew about raised walkable geometry — the temple plinth steps are
+    // ~0.34 m (first) to ~1.27 m (top) tall, so a player standing on
+    // them sank to his shins (user's screenshot 2026-11-10 00:09 IST:
+    // the camera-collision test teleports him to (6.27, -14), on the
+    // plinth's 4th tier, feet at y=0, step top ~0.5 m). A walkable top
+    // is an XZ square with a top Y; GroundHeightAt returns the HIGHEST
+    // top containing (x,z), else 0 (terrain). Nested squares model the
+    // stepped plinth (12 tiers) and the temple platform — the highest
+    // applicable top is the surface under the player's feet.
+    private struct WalkableTop { public float cx, cz, half, top; }
+    private static readonly List<WalkableTop> s_walkables = new List<WalkableTop>();
+
+    public static void RegisterWalkable(float cx, float cz, float half, float top)
+    {
+        s_walkables.Add(new WalkableTop { cx = cx, cz = cz, half = half, top = top });
+    }
+
+    public static float GroundHeightAt(float x, float z)
+    {
+        float g = 0f;
+        foreach (WalkableTop w in s_walkables)
+        {
+            if (Mathf.Abs(x - w.cx) <= w.half && Mathf.Abs(z - w.cz) <= w.half)
+            {
+                if (w.top > g) g = w.top;
+            }
+        }
+        return g;
+    }
+
     public static void Register(Bounds b)
     {
         s_blocks.Add(b);
@@ -46,6 +78,7 @@ public static class VillageColliders
     public static void Clear()
     {
         s_blocks.Clear();
+        s_walkables.Clear();
     }
 
     // Camera collision (audit M1): ray vs the registered blocking volumes
