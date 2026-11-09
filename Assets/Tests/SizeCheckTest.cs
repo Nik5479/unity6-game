@@ -36,7 +36,10 @@ public class SizeCheckTest
         new Landmark("House_2", "house2", 4f, 7f),
         new Landmark("House_5", "house5", 4f, 7f),
         new Landmark("Tree_Banyan", "banyan", 12f, 18f),
-        new Landmark("Tree_Palm", "palm", 8f, 12f),
+        // ROUND 5: Tree_Palm (hero palm) was REMOVED — its trunk is
+        // stacked plates in the model and no verified replacement exists.
+        // The mango is the replacement tree landmark (9 m, same range).
+        new Landmark("Tree_Mango", "mango", 8f, 12f),
         new Landmark("Cow", "cow", 1.2f, 1.7f),
         new Landmark("HeroCar", "herocar", 1.3f, 1.7f),
     };
