@@ -225,6 +225,11 @@ public class VillageBuilder : MonoBehaviour
     // village builds, hidden by FinishBuild(). The BootStatus text
     // (per-model progress) sits above it.
     private GameObject loadingOverlay;
+    // ROUND 4 (loading fix): the MobileCanvas reference, cached in Awake.
+    // GameObject.Find CANNOT find an inactive object, so FinishBuild()
+    // must use this field — Find("MobileCanvas") there returns null and
+    // the HUD stays hidden forever (joystick/buttons never come back).
+    private GameObject mobileCanvas;
     private int buildErrors;
 
     // Phase 3: real .glb models load async via glTFast. The CI test waits
@@ -293,8 +298,9 @@ public class VillageBuilder : MonoBehaviour
         // hide it now — the joystick/buttons sit behind the loading
         // screen until FinishBuild() shows them again. The input gate
         // in PlayerController is the real block; hiding the HUD is so
-        // the player never sees dead controls.
-        GameObject mobileCanvas = GameObject.Find("MobileCanvas");
+        // the player never sees dead controls. Cache the reference:
+        // Find() cannot see it once it is inactive.
+        mobileCanvas = GameObject.Find("MobileCanvas");
         if (mobileCanvas != null) mobileCanvas.SetActive(false);
 
         // Each step is isolated: one failing step must not kill the village.
@@ -508,7 +514,8 @@ public class VillageBuilder : MonoBehaviour
         GameObject player = GameObject.Find("Player");
         PlayerController pc = (player != null) ? player.GetComponent<PlayerController>() : null;
         if (pc != null) pc.inputEnabled = true;
-        GameObject mobileCanvas = GameObject.Find("MobileCanvas");
+        // ROUND 4 (loading fix): use the cached reference — Find() returns
+        // null for the inactive canvas, which silently left the HUD hidden.
         if (mobileCanvas != null) mobileCanvas.SetActive(true);
         if (loadingOverlay != null) loadingOverlay.SetActive(false);
         bool cutShort = GltfModelLoader.DeadlineReached;
