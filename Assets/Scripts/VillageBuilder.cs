@@ -2474,11 +2474,22 @@ public class VillageBuilder : MonoBehaviour
         // aerial roots (the old 3.2k-tri banyan + its 35 m base disc are gone).
         yield return LoadRealTree("chinese_banyan_ficus_microcarpa_9_tpa1.glb", "Tree_Banyan",
             new Vector3(19f, 0f, 5f), 13f, GltfModelLoader.ColliderMode.Trunk, g => banyan = g);
-        // Replacement 2026-11-07: Realistic Palm Tree Free, 27k tris,
-        // single date palm (the old 2.9k-tri cluster rendered black).
-        yield return LoadRealTree("realistic_palm_tree_free_8_k8rm.glb", "Tree_Palm",
-            new Vector3(-1f, 0f, 16.5f), 10f, GltfModelLoader.ColliderMode.FullBounds,
-            g => { palm = g; FixPalmMaterials(g); });
+        // ROUND 5 (final chance): the hero palm is REMOVED, not replaced.
+        // Its trunk is stacked flat yellow plates IN the model geometry
+        // (verified in the .glb: a single trunk mesh of ringed plates) —
+        // repainting cannot fix the shape, and no free realistic palm
+        // .glb passes verification this round (searched Poly Haven,
+        // GitHub, itch.io, Tripo, Meshy, free3d, CGTrader, Sketchfab,
+        // Quaternius — the one downloadable candidate failed; everything
+        // else needs a login, is low-poly/cartoon, or is paid). The palm
+        // stood at (-1, 16.5), right on the spawn path, so it was the
+        // worst offender in the user's phone videos. The jungle ring
+        // keeps its far-variant palms (palm_far, distant, small on
+        // screen). If a verified realistic palm is found later, restore
+        // this call with the new file.
+        // yield return LoadRealTree("realistic_palm_tree_free_8_k8rm.glb", "Tree_Palm",
+        //     new Vector3(-1f, 0f, 16.5f), 10f, GltfModelLoader.ColliderMode.FullBounds,
+        //     g => { palm = g; FixPalmMaterials(g); });
         // Phase 2 REMOVED: trees_25_wae0 "Tree_Pack" (was (-18,-18), 8 m).
         // Its three materials are flat colours with NO textures and
         // single-sided (doubleSided=false) — a cartoon-style cluster
