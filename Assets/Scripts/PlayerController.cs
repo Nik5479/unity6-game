@@ -43,12 +43,37 @@ public class PlayerController : MonoBehaviour
     // Set by VillageBuilder.
     public Camera playerCamera;
 
+    // ROUND 4 (loading): input gate — false while the village is
+    // still building, true once FinishBuild() releases it. The
+    // v1.0.5 phone video showed the player walking an incomplete
+    // village for ~15 s ("Village: building..." on screen). With the
+    // gate closed the joystick/buttons are hidden AND dead; with it
+    // open the game plays exactly as before.
+    public bool inputEnabled = false;
+
     private float yVelocity;
     private bool isGrounded = true;
     private const float kRadius = 0.45f;
 
     void Update()
     {
+        // ROUND 4 (loading): gate closed — no movement, no jump, no
+        // crouch. Zero the inputs so there is no residual drift when
+        // the gate opens, and keep gravity running so a spawn above
+        // ground still settles. Buttons call Jump()/Interact() directly
+        // (bypassing Update), so those are guarded individually too.
+        if (!inputEnabled)
+        {
+            moveInput = Vector2.zero;
+            runHeld = false;
+            crouchHeld = false;
+            IsCrouching = false;
+            speedSmooth = 0f;
+            CurrentSpeed = 0f;
+            ApplyGravity();
+            return;
+        }
+
         float h = Input.GetAxis("Horizontal");
         float v = Input.GetAxis("Vertical");
         if (moveInput.sqrMagnitude > 0.01f)
@@ -112,7 +137,13 @@ public class PlayerController : MonoBehaviour
             Jump();
         }
 
-        // Simple gravity, ground is at y = 0.5 (player centre).
+        ApplyGravity();
+    }
+
+    // Simple gravity, ground is at y = 0.5 (player centre). Extracted
+    // so the loading gate can keep it running while input is closed.
+    private void ApplyGravity()
+    {
         if (!isGrounded)
         {
             yVelocity -= 20f * Time.deltaTime;
@@ -130,13 +161,14 @@ public class PlayerController : MonoBehaviour
 
     public void Jump()
     {
-        if (!isGrounded || IsCrouching) return;
+        if (!inputEnabled || !isGrounded || IsCrouching) return;
         yVelocity = jumpForce;
         isGrounded = false;
     }
 
     public void Interact()
     {
+        if (!inputEnabled) return;
         if (GameManager.Instance != null)
         {
             GameManager.Instance.TryInteract();

@@ -221,6 +221,10 @@ public class VillageBuilder : MonoBehaviour
     private Camera mainCam;
     private Shader standardShader;
     private Text bootStatusText;
+    // ROUND 4 (loading): full-screen dim + centre line shown while the
+    // village builds, hidden by FinishBuild(). The BootStatus text
+    // (per-model progress) sits above it.
+    private GameObject loadingOverlay;
     private int buildErrors;
 
     // Phase 3: real .glb models load async via glTFast. The CI test waits
@@ -284,6 +288,14 @@ public class VillageBuilder : MonoBehaviour
         // the end of the build, and in the video the build never finished
         // in 33 s — so there was never a joystick at all).
         SetupCameraAndUIEarly();
+        // ROUND 4 (loading): the HUD is built in SetupCameraAndUIEarly
+        // (MobileControls.Awake runs synchronously on AddComponent), so
+        // hide it now — the joystick/buttons sit behind the loading
+        // screen until FinishBuild() shows them again. The input gate
+        // in PlayerController is the real block; hiding the HUD is so
+        // the player never sees dead controls.
+        GameObject mobileCanvas = GameObject.Find("MobileCanvas");
+        if (mobileCanvas != null) mobileCanvas.SetActive(false);
 
         // Each step is isolated: one failing step must not kill the village.
         AllModelsLoaded = false;
@@ -488,6 +500,17 @@ public class VillageBuilder : MonoBehaviour
         if (villageRoot == null || gameObject == null || !gameObject.scene.isLoaded) return;
         RunStep("SetupSystems", SetupSystems);
         RunStep("SceneAmbience", SetupSceneAmbience);
+        // ROUND 4 (loading): the village is built — release the input
+        // gate and show the HUD. This runs for every exit (normal,
+        // deadline-skip, watchdog) because FinishBuild is the single
+        // funnel. The loading dim hides; the "N objects built" banner
+        // stays 5 s (ClearBootStatusAfter) as before.
+        GameObject player = GameObject.Find("Player");
+        PlayerController pc = (player != null) ? player.GetComponent<PlayerController>() : null;
+        if (pc != null) pc.inputEnabled = true;
+        GameObject mobileCanvas = GameObject.Find("MobileCanvas");
+        if (mobileCanvas != null) mobileCanvas.SetActive(true);
+        if (loadingOverlay != null) loadingOverlay.SetActive(false);
         bool cutShort = GltfModelLoader.DeadlineReached;
         SetBootStatus("Village: " + CountVillageObjects() + " objects built"
             + (cutShort ? " — build timed out, started with what loaded" : "")
@@ -578,6 +601,38 @@ public class VillageBuilder : MonoBehaviour
             sh.effectColor = new Color(0f, 0f, 0f, 0.9f);
             sh.effectDistance = new Vector2(2f, -2f);
             bootStatusText = t;
+            // ROUND 4 (loading): full-screen dim + big centre line so
+            // the build never looks like a frozen game. The per-model
+            // progress (BootStatus text) stays on top of the dim — the
+            // text is moved to last sibling below. Roman Hindi on
+            // purpose: the boot font has no Devanagari glyphs.
+            GameObject dimGO = new GameObject("LoadingDim");
+            RectTransform dimRT = dimGO.AddComponent<RectTransform>();
+            dimRT.SetParent(canvasGO.transform, false);
+            dimRT.anchorMin = Vector2.zero;
+            dimRT.anchorMax = Vector2.one;
+            dimRT.sizeDelta = Vector2.zero;
+            Image dimImg = dimGO.AddComponent<Image>();
+            dimImg.color = new Color(0f, 0f, 0f, 0.72f);
+            GameObject loadGO = new GameObject("LoadingText");
+            RectTransform loadRT = loadGO.AddComponent<RectTransform>();
+            loadRT.SetParent(dimGO.transform, false);
+            loadRT.anchorMin = new Vector2(0.5f, 0.5f);
+            loadRT.anchorMax = new Vector2(0.5f, 0.5f);
+            loadRT.anchoredPosition = Vector2.zero;
+            loadRT.sizeDelta = new Vector2(1100f, 60f);
+            Text lt = loadGO.AddComponent<Text>();
+            lt.font = f;
+            lt.fontSize = 34;
+            lt.alignment = TextAnchor.MiddleCenter;
+            lt.color = Color.white;
+            lt.text = "Gaon ban raha hai...";
+            MobileControls.ApplyUiMaterial(lt, true);
+            Shadow lsh = loadGO.AddComponent<Shadow>();
+            lsh.effectColor = new Color(0f, 0f, 0f, 0.9f);
+            lsh.effectDistance = new Vector2(2f, -2f);
+            loadingOverlay = dimGO;
+            textGO.transform.SetAsLastSibling();
         }
         catch (System.Exception e)
         {

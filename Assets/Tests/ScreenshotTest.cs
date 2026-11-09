@@ -214,6 +214,21 @@ public class ScreenshotTest
             Assert.LessOrEqual(Mathf.Abs(np.y), 0.5f, "NPC " + npcName + " floating/sunk (y=" + np.y + ")");
         }
 
+        // (a7) ROUND 4 (loading): the loading gate must be RELEASED
+        // once the village is built — input enabled, loading dim
+        // hidden, HUD active. (The gate being closed DURING the build
+        // is proven by the emulator's load screenshots, not here.)
+        GameObject bootCanvas = GameObject.Find("BootStatusCanvas");
+        Assert.IsNotNull(bootCanvas, "BootStatusCanvas missing — loading UI never built");
+        Assert.IsNull(GameObject.Find("LoadingDim"),
+            "Loading screen still visible after the village built — FinishBuild never hid it");
+        Component pcComp = player.GetComponent("PlayerController") as Component;
+        Assert.IsNotNull(pcComp, "PlayerController not found for loading-gate check");
+        System.Reflection.FieldInfo gateField = pcComp.GetType().GetField("inputEnabled");
+        Assert.IsNotNull(gateField, "PlayerController.inputEnabled field missing");
+        Assert.IsTrue((bool)gateField.GetValue(pcComp),
+            "Player input still gated after the village built — loading gate never released");
+
         // (b) Houses must be visible from the gameplay camera.
         Plane[] planes = GeometryUtility.CalculateFrustumPlanes(cam);
         string[] houseNames = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6" };
