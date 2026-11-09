@@ -19,10 +19,11 @@ public class PlayerController : MonoBehaviour
     public const float WalkSpeed = 1.4f;
     public const float JogSpeed = 2.5f;
     public const float RunSpeed = 4.0f;
-    // Acceleration / deceleration (m/s^2): reaching jog takes ~0.3 s,
-    // stopping ~0.25 s — no more instant full speed / dead stops.
-    public float accel = 8f;
-    public float decel = 10f;
+    // Acceleration / deceleration (m/s^2): reaching jog takes ~0.5 s,
+    // stopping ~0.35 s — GTA weight, no more instant full speed / dead
+    // stops. (ROUND 4 WALK: was 8/10 — too twitchy.)
+    public float accel = 5f;
+    public float decel = 7f;
     public float jumpForce = 5f;
     // Actual smoothed ground speed (m/s), for the animator's foot-speed
     // matching. Read-only outside this class.
@@ -97,12 +98,14 @@ public class PlayerController : MonoBehaviour
             // OVERNIGHT R3: crouch state follows the held button (grounded only).
             IsCrouching = crouchHeld && isGrounded;
             // Joystick magnitude sets the speed: half deflection = walk,
-            // full deflection = jog, RUN button held = run. Below half
+            // full deflection = jog, RUN button held = run SCALED by the
+            // stick (was: full RunSpeed regardless of mag — a barely
+            // touched stick + RUN held = full sprint). Below half
             // deflection the walk scales with the stick (slow creep).
             // Crouching overrides: slow crouch-walk scaled by the stick.
             float mag = Mathf.Clamp01(move.magnitude);
             float target = IsCrouching ? kCrouchSpeed * mag
-                : runHeld ? RunSpeed
+                : runHeld ? Mathf.Lerp(JogSpeed, RunSpeed, mag)
                 : (mag < 0.5f ? WalkSpeed * (mag / 0.5f)
                               : Mathf.Lerp(WalkSpeed, JogSpeed, (mag - 0.5f) / 0.5f));
             speedSmooth = Mathf.MoveTowards(speedSmooth, target,
@@ -118,7 +121,7 @@ public class PlayerController : MonoBehaviour
             // Face the movement direction (visual figure rotates with the body).
             float targetYaw = Mathf.Atan2(move.x, move.z) * Mathf.Rad2Deg;
             float curYaw = transform.eulerAngles.y;
-            float newYaw = Mathf.MoveTowardsAngle(curYaw, targetYaw, 720f * Time.deltaTime);
+            float newYaw = Mathf.MoveTowardsAngle(curYaw, targetYaw, 360f * Time.deltaTime);
             transform.rotation = Quaternion.Euler(0f, newYaw, 0f);
         }
         else

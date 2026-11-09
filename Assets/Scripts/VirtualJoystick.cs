@@ -43,6 +43,14 @@ public class VirtualJoystick : MonoBehaviour, IPointerDownHandler, IDragHandler,
         {
             v.Normalize();
         }
+        // ROUND 4 WALK: dead zone — a small accidental touch must not
+        // move Nilesh (was: any touch > 0.1 mag moved him, and the
+        // animator's 0.4 m/s walk threshold meant slow creep played
+        // Idle while gliding forward).
+        if (v.magnitude < 0.15f)
+        {
+            v = Vector2.zero;
+        }
         Value = v;
         if (knob != null)
         {

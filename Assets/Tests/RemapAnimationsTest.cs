@@ -37,4 +37,34 @@ public class RemapAnimationsTest
             Debug.Log("[ClipCheck] " + n + ": " + (clip != null ? clip.length.ToString("F2") + "s" : "MISSING (animator falls back)"));
         }
     }
+
+    // ROUND 4 WALK: the committed clips must carry NO forward root
+    // motion. The old files ramped Hips z 1.81 m (walk) / 3.68 m (run)
+    // per loop while PlayerController ALSO moved the root — feet slid
+    // and the whole body snapped back every cycle. In-place clips have
+    // near-constant Hips x/z (only the vertical bob remains, which is
+    // the y curve and is intentionally kept).
+    [Test]
+    public void ClipsAreInPlace()
+    {
+        const string hipsPath = "Sketchfab_model/803b21a9e5ca42e2adaea3abf262f423.fbx/Object_2/RootNode/AvatarRoot/Object_5/_rootJoint/Hips_01";
+        foreach (string n in new string[] { "NileshIdle", "NileshWalk", "NileshRun", "NileshSprint" })
+        {
+            AnimationClip clip = Resources.Load<AnimationClip>("Animations/" + n);
+            Assert.IsNotNull(clip, "Committed clip missing: " + n);
+            foreach (string prop in new string[] { "m_LocalPosition.x", "m_LocalPosition.z" })
+            {
+                AnimationCurve curve = clip.GetCurve(hipsPath, typeof(Transform), prop);
+                Assert.IsNotNull(curve, n + ": no Hips " + prop + " curve — rig path changed?");
+                float lo = float.MaxValue, hi = float.MinValue;
+                foreach (Keyframe k in curve.keys)
+                {
+                    lo = Mathf.Min(lo, k.value);
+                    hi = Mathf.Max(hi, k.value);
+                }
+                Debug.Log("[ClipCheck] " + n + " Hips " + prop + " range: " + lo.ToString("F4") + ".." + hi.ToString("F4"));
+                Assert.Less(hi - lo, 0.01f, n + ": Hips " + prop + " still carries root motion (range " + (hi - lo).ToString("F3") + " m) — clip is not in-place");
+            }
+        }
+    }
 }

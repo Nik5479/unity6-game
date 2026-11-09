@@ -179,18 +179,36 @@ public class NileshAnimator : MonoBehaviour
     void Update()
     {
         if (anim == null) return;
-        Vector3 p = transform.position;
         float dt = Time.deltaTime;
         if (dt <= 0f) return;
-        float speed = new Vector2(p.x - prevPos.x, p.z - prevPos.z).magnitude / dt;
-        prevPos = p;
-        speedSmooth = Mathf.Lerp(speedSmooth, speed, Mathf.Clamp01(dt * 8f));
+        // ROUND 4 WALK: the animator trusts the controller's INTENDED
+        // speed (pc.CurrentSpeed — already accel/decel-smoothed), not the
+        // position delta. The old delta measure read 0 whenever TryMove
+        // was blocked by a wall/door, so Nilesh stood Idle with the
+        // joystick held (phone video frame-20s: stick UP, idle at the
+        // door). Fallback to the delta only if the controller is missing.
+        if (pc != null)
+        {
+            speedSmooth = pc.CurrentSpeed;
+        }
+        else
+        {
+            Vector3 p = transform.position;
+            float speed = new Vector2(p.x - prevPos.x, p.z - prevPos.z).magnitude / dt;
+            prevPos = p;
+            speedSmooth = Mathf.Lerp(speedSmooth, speed, Mathf.Clamp01(dt * 8f));
+        }
 
         // Phase 1 speeds (PlayerController): walk 1.4, jog 2.5, run 4.0.
         // Jog uses the run clip (there is no separate jog clip).
         // OVERNIGHT R3: airborne (player centre y > 0.6 — ground is 0.5)
-        // plays the Jump clip once; crouching plays CrouchWalk; full
-        // run speed plays the Sprint clip (distinct from Run).
+        // plays the Jump clip once; crouching plays CrouchWalk.
+        // ROUND 4 WALK: the Sprint clip is never selected — max script
+        // speed 4.0 m/s can never reach its 6.06 m/s natural speed, so
+        // full run plays the Run clip at 4.0/5.81 = 0.69x (feet still
+        // plant). Walk clip below 2.0 m/s, Run clip at/above, with
+        // +/-0.15 m/s hysteresis on the boundary so speed noise near
+        // 2.0 does not flip clips every frame.
         bool airborne = transform.position.y > 0.6f;
         if (airborne && hasJump && current != "NileshJump")
         {
@@ -206,8 +224,9 @@ public class NileshAnimator : MonoBehaviour
             }
             else if (speedSmooth > 0.4f)
             {
-                if (speedSmooth > 3.4f) want = hasSprint ? "NileshSprint" : (hasRun ? "NileshRun" : "NileshWalk");
-                else if (speedSmooth > 1.9f) want = hasRun ? "NileshRun" : "NileshWalk";
+                bool inRun = (current == "NileshRun" || current == "NileshSprint");
+                float runThresh = inRun ? 1.85f : 2.15f;
+                if (speedSmooth > runThresh) want = hasRun ? "NileshRun" : "NileshWalk";
                 else want = hasWalk ? "NileshWalk" : "NileshIdle";
             }
             if (want != current)
@@ -219,20 +238,23 @@ public class NileshAnimator : MonoBehaviour
             }
         }
         // Match the clip's playback speed to the ground speed so the feet
-        // don't slide: the walk cycle is authored for ~1.4 m/s and the run
-        // cycle for ~4.2 m/s. Clamped so a lag spike never fast-forwards
-        // the animation. (Idle keeps 1x — it has no ground speed.)
-        // OVERNIGHT R3: sprint base ~5.0 m/s (Mixamo Sprint take),
-        // crouch-walk base 0.7 m/s (PlayerController.kCrouchSpeed).
+        // don't slide. ROUND 4 WALK: base speeds are MEASURED from the
+        // committed clips (Hips z travel / clip length) — Walk 1.75,
+        // Run 5.81, Sprint 6.06 m/s — not the old guesses (1.4/4.2/5.0).
+        // With in-place clips, playback = speed / baseSpeed plants the
+        // feet exactly. Clamp floor 0.35x (was 0.5x): jog on the Run clip
+        // needs 2.5/5.81 = 0.43x, and the old floor made feet slide
+        // backwards. (Idle keeps 1x — it has no ground speed.)
+        // OVERNIGHT R3: crouch-walk base 0.7 m/s (PlayerController.kCrouchSpeed).
         if (current == "NileshWalk" || current == "NileshRun" || current == "NileshSprint" || current == "NileshCrouchWalk")
         {
             AnimationState st = anim[current];
             if (st != null)
             {
-                float baseSpeed = (current == "NileshSprint") ? 5.0f
+                float baseSpeed = (current == "NileshSprint") ? 6.06f
                     : (current == "NileshCrouchWalk") ? 0.7f
-                    : (current == "NileshRun") ? 4.2f : 1.4f;
-                st.speed = Mathf.Clamp(speedSmooth / baseSpeed, 0.5f, 1.5f);
+                    : (current == "NileshRun") ? 5.81f : 1.75f;
+                st.speed = Mathf.Clamp(speedSmooth / baseSpeed, 0.35f, 1.5f);
             }
         }
     }

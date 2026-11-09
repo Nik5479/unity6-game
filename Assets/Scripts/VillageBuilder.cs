@@ -1903,6 +1903,15 @@ public class VillageBuilder : MonoBehaviour
         {
             walk = player.AddComponent<CharacterWalk>();
         }
+        // ROUND 4 WALK: DISABLE CharacterWalk for the real Nilesh. Its
+        // procedural bob (+6 cm, ~1 Hz) runs out of phase with the mocap
+        // clip's own 7.7 cm hip bob, so the feet float/pulse — and its
+        // footstep audio fires on the same unsynced phase, so footsteps
+        // never match foot strikes. The mocap clips already bob + step
+        // correctly on their own. CharacterWalk stays ONLY for the
+        // primitive fallback figure (which has no clips). Footstep audio
+        // goes quiet with it — unsynced steps are worse than none.
+        walk.enabled = false;
         walk.figureRoot = nilesh.transform;
         walk.armL = null;
         walk.armR = null;

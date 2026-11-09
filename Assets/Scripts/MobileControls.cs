@@ -348,7 +348,9 @@ public class MobileControls : MonoBehaviour
         ApplyUiMaterial(knobImg, false);
         knobImg.sprite = ControlIcons.CircleSprite();
         joystick = joyBG.AddComponent<VirtualJoystick>();
-        joystick.radius = 40f;
+        // ROUND 4 WALK: radius 55 px (was 40 on a 140 px base — full
+        // deflection at ~29% of the base radius, very twitchy).
+        joystick.radius = 55f;
         // Rim ring (decorative — must not eat touches).
         GameObject joyRing = new GameObject("Ring");
         RectTransform ringRect = joyRing.AddComponent<RectTransform>();
