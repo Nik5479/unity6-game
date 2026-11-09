@@ -179,9 +179,9 @@ public class DayNightCycle : MonoBehaviour
         // ROUND 4 (look): warm late afternoon instead of flat bright
         // midday — softer sun (1.05, was 1.3) lower in the sky (35 deg,
         // was 50) for longer shadows, and visible light haze (fog
-        // 0.006, was 0.0025). Still bright enough to read clearly.
+        // 0.008, was 0.006 — ROUND 5b horizon dressing). Still bright enough to read clearly.
         SetSun(1.05f, kDaySun, 35f);
-        SetSky(kDaySky, kDayFog, 0.006f, kDayAmbient);
+        SetSky(kDaySky, kDayFog, 0.008f, kDayAmbient); // ROUND 5b: 0.006 -> 0.008, horizon haze (see ApplyBlend).
         SetLamp(0f);
         SetMoon(0f);
     }
@@ -197,7 +197,7 @@ public class DayNightCycle : MonoBehaviour
             ? Color.Lerp(kDaySun, kDuskSun, k * 2f)
             : Color.Lerp(kDuskSun, kNightMoon, (k - 0.5f) * 2f);
         SetSun(Mathf.Lerp(1.05f, 0.7f, k), sunColor, Mathf.Lerp(35f, 16f, k));
-        SetSky(Color.Lerp(kDaySky, kNightSky, k), Color.Lerp(kDayFog, kNightFog, k), Mathf.Lerp(0.006f, 0.018f, k), Color.Lerp(kDayAmbient, kNightAmbient, k));
+        SetSky(Color.Lerp(kDaySky, kNightSky, k), Color.Lerp(kDayFog, kNightFog, k), Mathf.Lerp(0.008f, 0.018f, k), Color.Lerp(kDayAmbient, kNightAmbient, k));
         SetLamp(k);
         SetMoon(k);
     }

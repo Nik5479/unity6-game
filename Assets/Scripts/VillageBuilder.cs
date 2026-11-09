@@ -2557,6 +2557,25 @@ public class VillageBuilder : MonoBehaviour
             CloneRingTree(ringSources, ringIndex++, new Vector3(-21f, 0f, z));
             CloneRingTree(ringSources, ringIndex++, new Vector3(21f, 0f, z));
         }
+        // ROUND 5b: second, sparser ring at ~30 m — cheap horizon
+        // dressing. The first ring sits at 21 m and beyond it the bare
+        // ground plane runs to the fog fade (~100 m), which reads as a
+        // flat brown horizon in every wide shot. A second tree line at
+        // 30 m (mango/banyan only — no palms left) breaks the band.
+        // Deterministic radial jitter so it does not read as a fence
+        // line; same keep-out rules as the first ring (CloneRingTree).
+        for (int x = -30; x <= 30; x += 6)
+        {
+            float j = ((ringIndex % 3) - 1) * 1.5f;
+            CloneRingTree(ringSources, ringIndex++, new Vector3(x, 0f, -30f + j));
+            CloneRingTree(ringSources, ringIndex++, new Vector3(x, 0f, 30f - j));
+        }
+        for (int z = -24; z <= 24; z += 8)
+        {
+            float j = ((ringIndex % 3) - 1) * 1.5f;
+            CloneRingTree(ringSources, ringIndex++, new Vector3(-30f + j, 0f, z));
+            CloneRingTree(ringSources, ringIndex++, new Vector3(30f - j, 0f, z));
+        }
 
         // The far sources were only templates for the ring clones.
         if (mangoFar != null) mangoFar.SetActive(false);
