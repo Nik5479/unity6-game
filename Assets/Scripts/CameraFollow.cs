@@ -90,6 +90,32 @@ public class CameraFollow : MonoBehaviour
     private float currentDist;
     private bool hasCurrentDist;
 
+    // ROUND 5 (final chance, 2026-11-09): the user reported a small
+    // downward drag flips the camera fully down, and the camera passes
+    // through walls/objects. Two causes, both here:
+    //   (a) Drag sensitivity: yaw 0.28 / pitch 0.12 deg per px moved the
+    //       FULL pitch range (2..28) in ~200 px, with no dead zone and no
+    //       smoothing — one flick slammed the camera to an extreme. Now
+    //       slower (yaw 0.12, pitch 0.05), a 2 px dead zone, a tighter
+    //       pitch clamp (3..18), and the live pitch/yaw ease toward
+    //       TARGET values so a flick can never snap the camera.
+    //   (b) Occluder staleness: the occluder list was collected ONCE, the
+    //       first frame House_Player/Dock existed, while House_6 and other
+    //       structures were still loading (no renderers / zero bounds) —
+    //       so the camera could swing into the stilt house all session.
+    //       The list now re-collects every 2 s until the village reports
+    //       built, and VillageBuilder calls RefreshOccluders() at
+    //       FinishBuild, so the final list covers every structure.
+    public float dragSensitivityYaw = 0.12f;
+    public float dragSensitivityPitch = 0.05f;
+    public float dragDeadZonePx = 2f;
+    public float dragSmoothRate = 10f;
+    public float minPitch = 3f;
+    public float maxPitch = 18f;
+    private float targetYaw = 0f;
+    private float targetPitch = 5f;
+    private float lastOccluderRefresh = -10f;
+
     void OnEnable()
     {
         // ResetToStarterView disables this component; on re-enable the
@@ -97,13 +123,28 @@ public class CameraFollow : MonoBehaviour
         hasCurrentDist = false;
     }
 
+    // ROUND 5: re-collect the occluders from the live scene (clear +
+    // rebuild). Called by VillageBuilder at FinishBuild and every 2 s
+    // until the village reports built, so a structure that loads late
+    // (House_6, Dock) is never missing from the camera collision test.
+    public void RefreshOccluders()
+    {
+        occludersCollected = false;
+        camOccluders.Clear();
+        EnsureOccluders();
+        lastOccluderRefresh = Time.time;
+    }
+
     // Collect camera occluders from the scene itself. Runs lazily until the
     // runtime-built village exists (the camera is added by VillageBuilder,
-    // possibly before the structures spawn). One-time cost.
+    // possibly before the structures spawn). Recomputes from the CURRENT
+    // renderers every call (ROUND 5: the old one-time snapshot missed
+    // structures that had not loaded yet).
     private void EnsureOccluders()
     {
         if (occludersCollected) return;
         if (GameObject.Find("House_Player") == null && GameObject.Find("Dock") == null) return;
+        camOccluders.Clear();
         occludersCollected = true;
         string[] roots = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6",
             "Temple", "School", "Haveli", "Clinic", "Dock", "Well", "Gate",
@@ -205,6 +246,8 @@ public class CameraFollow : MonoBehaviour
             // south — in front of him, showing his face — chosen only to
             // frame Houses 3, 4, 6 for the screenshot test.
             yaw = 0f;
+            targetYaw = yaw;
+            targetPitch = pitch;
             prevTargetPos = target.position;
             hasPrevTargetPos = true;
         }
@@ -263,8 +306,29 @@ public class CameraFollow : MonoBehaviour
                 Mathf.Sin(yaw * Mathf.Deg2Rad), 0f, Mathf.Cos(yaw * Mathf.Deg2Rad));
             if (Vector3.Angle(moveDir, camFwd) < 40f)
             {
-                yaw = Mathf.MoveTowardsAngle(yaw, target.eulerAngles.y, 60f * Time.deltaTime);
+                // ROUND 5: the auto-centre steers the TARGET yaw; the live
+                // yaw eases toward it below, so a manual drag is never
+                // fought frame-by-frame.
+                targetYaw = Mathf.MoveTowardsAngle(targetYaw, target.eulerAngles.y, 60f * Time.deltaTime);
             }
+        }
+
+        // ROUND 5: ease the live yaw/pitch toward their targets and clamp
+        // the pitch every frame (a drag can only move the targets, so the
+        // camera can never snap to an extreme in one frame, and a stale
+        // pitch value can never survive a frame unclamped).
+        float ease = 1f - Mathf.Exp(-dragSmoothRate * Time.deltaTime);
+        yaw = Mathf.LerpAngle(yaw, targetYaw, ease);
+        pitch = Mathf.Lerp(pitch, targetPitch, ease);
+        pitch = Mathf.Clamp(pitch, minPitch, maxPitch);
+        targetPitch = Mathf.Clamp(targetPitch, minPitch, maxPitch);
+
+        // ROUND 5: re-collect the occluders every 2 s until the village
+        // reports built, so late-loading structures join the collision
+        // test as soon as they exist (the one-time snapshot missed them).
+        if (!VillageBuilder.AllModelsLoaded && Time.time - lastOccluderRefresh > 2f)
+        {
+            RefreshOccluders();
         }
 
         Vector3 want;
@@ -378,6 +442,24 @@ public class CameraFollow : MonoBehaviour
         return EventSystem.current.IsPointerOverGameObject(fingerId);
     }
 
+    /// <summary>
+    /// ROUND 5 (final chance): one place for drag input — touch and mouse
+    /// both call this, and the PlayMode test calls it directly (real touch
+    /// input cannot be injected in a test). A small drag no longer slams
+    /// the camera: deltas under the dead zone are ignored, the rest move
+    /// the TARGET pitch/yaw at the tuned sensitivity, and the targets are
+    /// clamped so a full-screen flick can never flip the camera down.
+    /// Drag down (delta.y &lt; 0) lowers the camera, drag up raises it —
+    /// same mapping as before, only the magnitude changed.
+    /// </summary>
+    public void ApplyDragDelta(Vector2 delta)
+    {
+        if (delta.magnitude < dragDeadZonePx) return;
+        targetYaw -= delta.x * dragSensitivityYaw;
+        targetPitch = Mathf.Clamp(targetPitch + delta.y * dragSensitivityPitch, minPitch, maxPitch);
+        lastManualDragTime = Time.time;
+    }
+
     private void HandleTouchDrag()
     {
         for (int i = 0; i < Input.touchCount; i++)
@@ -395,10 +477,8 @@ public class CameraFollow : MonoBehaviour
             else if (t.phase == TouchPhase.Moved && t.fingerId == camFingerId)
             {
                 Vector2 delta = t.position - lastDragPos;
-                yaw -= delta.x * 0.28f;
-                pitch = Mathf.Clamp(pitch + delta.y * 0.12f, 2f, 28f);
+                ApplyDragDelta(delta);
                 lastDragPos = t.position;
-                lastManualDragTime = Time.time;
             }
             else if ((t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled) && t.fingerId == camFingerId)
             {
@@ -420,10 +500,8 @@ public class CameraFollow : MonoBehaviour
         else if (Input.GetMouseButton(0) && mouseDragging)
         {
             Vector2 delta = (Vector2)Input.mousePosition - lastDragPos;
-            yaw -= delta.x * 0.28f;
-            pitch = Mathf.Clamp(pitch + delta.y * 0.12f, 2f, 28f);
+            ApplyDragDelta(delta);
             lastDragPos = Input.mousePosition;
-            lastManualDragTime = Time.time;
         }
         else if (Input.GetMouseButtonUp(0))
         {

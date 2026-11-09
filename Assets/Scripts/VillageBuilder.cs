@@ -536,6 +536,13 @@ public class VillageBuilder : MonoBehaviour
         GameObject player = GameObject.Find("Player");
         PlayerController pc = (player != null) ? player.GetComponent<PlayerController>() : null;
         if (pc != null) pc.inputEnabled = true;
+        // ROUND 5 (camera): the village is fully loaded now — refresh the
+        // camera's occluder list so late-loading structures (House_6, Dock)
+        // join the collision test before the player can drag the camera.
+        // The camera sat behind the loading screen until now, so the
+        // refresh costs nothing visible.
+        CameraFollow follow = mainCam != null ? mainCam.GetComponent<CameraFollow>() : null;
+        if (follow != null) follow.RefreshOccluders();
         // ROUND 4 (loading fix): use the cached reference — Find() returns
         // null for the inactive canvas, which silently left the HUD hidden.
         if (mobileCanvas != null) mobileCanvas.SetActive(true);
