@@ -8,8 +8,9 @@ using UnityEngine.TestTools;
 /// <summary>
 /// ROUND 6 (2026-11-10): the user's v1.0.7 phone verdict was "chalne
 /// me run karne me kitna slow ho jata hai" — walk/run far too slow on
-/// the phone. The movement speeds are now Walk 2.0 / Jog 3.5 / Run 6.5
-/// m/s (PlayerController constants, GTA-like). The 5.81 / 6.06 numbers
+/// the phone. The movement speeds are now Walk 3.2 / Jog 4.5 / Run 6.5
+/// m/s (PlayerController constants, GTA-like; Walk 3.2 is Hark's
+/// proven walk speed from Bhoot Gaon). The 5.81 / 6.06 numbers
 /// in NileshAnimator are the animation clips' NATURAL speeds (Hips
 /// travel / clip length), used ONLY to match the clip playback rate so
 /// the feet plant on the ground; they are NOT movement speeds. This
@@ -107,19 +108,21 @@ public class PlayerSpeedTest
         Assert.GreaterOrEqual(runDisp, 8f, "Run displacement only " + runDisp.ToString("F2")
             + " m in 2.5 s — the player is not actually moving at run speed (blocked?)");
 
-        // Jog: full stick, no run. Target = Lerp(2.0, 3.5, 1.0) = 3.5.
+        // Jog: full stick, no run. Target = Lerp(3.2, 4.5, 1.0) = 4.5.
+        // BHOOT GAON (Round 6): Jog 3.5 -> 4.5 — Hark's walk alone is
+        // 3.2, so a 3.5 Jog was barely faster than walking.
         yield return MeasureRoutine(pc, moveField, runField, speedProp,
             new Vector2(h, v), false, 2.5f);
-        Debug.Log("[PlayerSpeedTest] Jog mean speed: " + m_mean.ToString("F2") + " m/s (expect ~3.5)");
-        Assert.GreaterOrEqual(m_mean, 3.1f, "Jog too slow (" + m_mean.ToString("F2") + " m/s, expect ~3.5)");
-        Assert.LessOrEqual(m_mean, 3.9f, "Jog too fast (" + m_mean.ToString("F2") + " m/s, expect ~3.5)");
+        Debug.Log("[PlayerSpeedTest] Jog mean speed: " + m_mean.ToString("F2") + " m/s (expect ~4.5)");
+        Assert.GreaterOrEqual(m_mean, 4.1f, "Jog too slow (" + m_mean.ToString("F2") + " m/s, expect ~4.5)");
+        Assert.LessOrEqual(m_mean, 4.9f, "Jog too fast (" + m_mean.ToString("F2") + " m/s, expect ~4.5)");
 
-        // Walk: half stick (mag 0.4), no run. Target = 2.0 * (0.4/0.5) = 1.6.
+        // Walk: half stick (mag 0.4), no run. Target = 3.2 * (0.4/0.5) = 2.56.
         yield return MeasureRoutine(pc, moveField, runField, speedProp,
             new Vector2(h * 0.4f, v * 0.4f), false, 2.5f);
-        Debug.Log("[PlayerSpeedTest] Walk mean speed: " + m_mean.ToString("F2") + " m/s (expect ~1.6)");
-        Assert.GreaterOrEqual(m_mean, 1.3f, "Walk too slow (" + m_mean.ToString("F2") + " m/s, expect ~1.6)");
-        Assert.LessOrEqual(m_mean, 1.9f, "Walk too fast (" + m_mean.ToString("F2") + " m/s, expect ~1.6)");
+        Debug.Log("[PlayerSpeedTest] Walk mean speed: " + m_mean.ToString("F2") + " m/s (expect ~2.56)");
+        Assert.GreaterOrEqual(m_mean, 2.2f, "Walk too slow (" + m_mean.ToString("F2") + " m/s, expect ~2.56)");
+        Assert.LessOrEqual(m_mean, 2.9f, "Walk too fast (" + m_mean.ToString("F2") + " m/s, expect ~2.56)");
 
         // Stop the player so later tests start clean.
         moveField.SetValue(pc, Vector2.zero);

@@ -17,13 +17,21 @@ public class PlayerController : MonoBehaviour
     // (walk/run far too slow on the phone). The old 1.4 / 2.5 / 4.0
     // were real-world walking speeds, but the village is ~44 m across
     // and the phone video showed Nilesh covering almost no ground in
-    // 35 s. Walk 2.0 / Jog 3.5 / Run 6.5 m/s: a run still takes ~7 s
+    // 35 s. Walk 3.2 / Jog 4.5 / Run 6.5 m/s: a run still takes ~7 s
     // to cross the village (no teleporting), but the game finally
     // feels like GTA instead of a slow shuffle. Supersedes the old
     // "fast speed na ho" order (Round 4) — the user explicitly asked
     // for faster movement after playing v1.0.7.
-    public const float WalkSpeed = 2.0f;
-    public const float JogSpeed = 3.5f;
+    // BHOOT GAON (Round 6, Hark's shipped horror village): walk 3.2 /
+    // sprint 6.5, proven phone feel. Our Walk was 2.0 — Hark's walk
+    // alone is 60% faster, which is why Nik says ours feels slow
+    // even before sprinting. Jog 4.5 sits between (full stick, no
+    // run button); Run 6.5 already matched Hark's sprint. Stamina
+    // (Hark: 6 s sprint, exhausted, returns at 30%) is NOT added
+    // here — it needs a HUD bar + tuning and the user asked for
+    // speed, not a stamina system. Deferred, see the round report.
+    public const float WalkSpeed = 3.2f;
+    public const float JogSpeed = 4.5f;
     public const float RunSpeed = 6.5f;
     // Acceleration / deceleration (m/s^2): reaching jog takes ~0.5 s,
     // stopping ~0.35 s — GTA weight, no more instant full speed / dead

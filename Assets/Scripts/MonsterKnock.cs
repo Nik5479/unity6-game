@@ -319,7 +319,10 @@ public class MonsterKnock : MonoBehaviour
         float dist = toPlayer.magnitude;
         if (dist < 2.5f) return true;
         PlayerController pc = player.GetComponent<PlayerController>();
-        if (pc != null && pc.CurrentSpeed > 4.5f && dist < 14f) return true;
+        // BHOOT GAON (Round 6): Jog is now 4.5 m/s, so the hearing
+        // threshold rises 4.5 -> 5.0 — Jog stays quiet, only a full
+        // Run (6.5) is loud enough for the monster to hear.
+        if (pc != null && pc.CurrentSpeed > 5.0f && dist < 14f) return true;
         if (dist < 20f)
         {
             float angle = Vector3.Angle(monster.forward, toPlayer);
