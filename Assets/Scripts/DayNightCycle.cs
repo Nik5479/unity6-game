@@ -46,6 +46,10 @@ public class DayNightCycle : MonoBehaviour
     private bool nightFired;
     private bool dawnFired;
     private float lampFlickerT;
+    // BHOOT GAON (Round 6, dark ground at night): the ambient-probe
+    // push timer (see SetSky).
+    private float nextProbe;
+    private bool probeSet;
 
     private static readonly Color kDaySky = new Color(0.53f, 0.81f, 0.98f);
     private static readonly Color kNightSky = new Color(0.02f, 0.03f, 0.07f);
@@ -181,6 +185,7 @@ public class DayNightCycle : MonoBehaviour
         // was 50) for longer shadows, and visible light haze (fog
         // 0.008, was 0.006 — ROUND 5b horizon dressing). Still bright enough to read clearly.
         SetSun(1.05f, kDaySun, 35f);
+        SetSunShadows(true);
         SetSky(kDaySky, kDayFog, 0.008f, kDayAmbient); // ROUND 5b: 0.006 -> 0.008, horizon haze (see ApplyBlend).
         SetLamp(0f);
         SetMoon(0f);
@@ -197,6 +202,7 @@ public class DayNightCycle : MonoBehaviour
             ? Color.Lerp(kDaySun, kDuskSun, k * 2f)
             : Color.Lerp(kDuskSun, kNightMoon, (k - 0.5f) * 2f);
         SetSun(Mathf.Lerp(1.05f, 0.7f, k), sunColor, Mathf.Lerp(35f, 16f, k));
+        SetSunShadows(true); // dusk: the sun is still up, shadows stay
         SetSky(Color.Lerp(kDaySky, kNightSky, k), Color.Lerp(kDayFog, kNightFog, k), Mathf.Lerp(0.008f, 0.018f, k), Color.Lerp(kDayAmbient, kNightAmbient, k));
         SetLamp(k);
         SetMoon(k);
@@ -210,6 +216,13 @@ public class DayNightCycle : MonoBehaviour
         // reference. Moonlight stays 0.5 and ambient 0.40 — the
         // readability floor, do not go below.
         SetSun(0.5f, kNightMoon, 16f);
+        // BHOOT GAON (Round 6, lag): no shadow pass at night. The sun
+        // is the moon now (dim, 0.5) — its shadows are barely visible,
+        // but the shadow map still re-renders the whole village every
+        // frame. Hark turns the sun's shadows off at night; the lamp
+        // lights never cast shadows in URP, so night has no shadow
+        // pass at all.
+        SetSunShadows(false);
         SetSky(kNightSky, kNightFog, 0.018f, kNightAmbient);
         // Lamp flickers: mostly on, occasional dips (horror feel).
         lampFlickerT += Time.deltaTime;
@@ -231,6 +244,7 @@ public class DayNightCycle : MonoBehaviour
     {
         // Dim grey morning after the night.
         SetSun(0.6f, new Color(0.8f, 0.82f, 0.85f), 30f);
+        SetSunShadows(true);
         SetSky(new Color(0.45f, 0.48f, 0.55f), new Color(0.4f, 0.42f, 0.48f), 0.008f, new Color(0.35f, 0.36f, 0.4f));
         SetLamp(0f);
         SetMoon(0f);
@@ -244,6 +258,16 @@ public class DayNightCycle : MonoBehaviour
         sun.transform.rotation = Quaternion.Euler(elevationDeg, -30f, 0f);
     }
 
+    // BHOOT GAON (Round 6, lag): no shadow pass at night. Guarded set
+    // — only touches the light when the value actually changes, so the
+    // per-frame phase methods cost nothing once it is set.
+    private void SetSunShadows(bool on)
+    {
+        if (sun == null) return;
+        LightShadows want = on ? LightShadows.Soft : LightShadows.None;
+        if (sun.shadows != want) sun.shadows = want;
+    }
+
     private void SetSky(Color sky, Color fog, float density, Color ambient)
     {
         if (cam != null)
@@ -254,6 +278,19 @@ public class DayNightCycle : MonoBehaviour
         RenderSettings.fogColor = fog;
         RenderSettings.fogDensity = density;
         RenderSettings.ambientLight = ambient;
+        // BHOOT GAON (Round 6, dark ground at night): URP lights
+        // everything from the ambient probe, which stays black in a
+        // scene that was never baked — the ground/characters/houses
+        // were black in the shade even though ambientLight was set.
+        // Push the ambient colour into the probe ourselves, every
+        // 0.5 s (cheap; a no-op if the engine already syncs it).
+        if (Time.time >= nextProbe || !probeSet)
+        {
+            nextProbe = Time.time + 0.5f; probeSet = true;
+            var sh = new UnityEngine.Rendering.SphericalHarmonicsL2();
+            sh.AddAmbientLight(ambient);
+            RenderSettings.ambientProbe = sh;
+        }
         // URP skybox: the moonless-HDRI sky is a night image, so its
         // exposure follows the phase — brighter in the day (reads as an
         // overcast grey-blue sky), darker at night. backgroundColor above
