@@ -6,19 +6,19 @@ using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 
 /// <summary>
-/// ROUND 4 follow-up (2026-11-09): the user ordered "fast speed na ho"
-/// (no fast speed). The movement speeds are Walk 1.4 / Jog 2.5 / Run 4.0
-/// m/s (PlayerController constants) — the 5.81 / 6.06 numbers in
-/// NileshAnimator are the animation clips' NATURAL speeds (Hips travel /
-/// clip length), used ONLY to match the clip playback rate so the feet
-/// plant on the ground; they are NOT movement speeds and must never be
-/// "fixed" down to 4.0 (that would make the feet slide backwards at
-/// ~1.8 m/s). This test measures the ACTUAL ground speed the player
-/// reaches and proves Run is ~4.0 m/s, not 5.81. It drives the real
-/// PlayerController via reflection (the test assembly cannot reference
-/// game classes), the same way ScreenshotTest drives the door walk-in:
-/// moveInput + runHeld are set EVERY frame because MobileControls
-/// overwrites moveInput from the (idle) joystick each Update.
+/// ROUND 6 (2026-11-10): the user's v1.0.7 phone verdict was "chalne
+/// me run karne me kitna slow ho jata hai" — walk/run far too slow on
+/// the phone. The movement speeds are now Walk 2.0 / Jog 3.5 / Run 6.5
+/// m/s (PlayerController constants, GTA-like). The 5.81 / 6.06 numbers
+/// in NileshAnimator are the animation clips' NATURAL speeds (Hips
+/// travel / clip length), used ONLY to match the clip playback rate so
+/// the feet plant on the ground; they are NOT movement speeds. This
+/// test measures the ACTUAL ground speed the player reaches and proves
+/// Run is ~6.5 m/s. It drives the real PlayerController via reflection
+/// (the test assembly cannot reference game classes), the same way
+/// ScreenshotTest drives the door walk-in: moveInput + runHeld are set
+/// EVERY frame because MobileControls overwrites moveInput from the
+/// (idle) joystick each Update.
 /// </summary>
 public class PlayerSpeedTest
 {
@@ -85,8 +85,11 @@ public class PlayerSpeedTest
         // only the commanded speed (CurrentSpeed is input-driven, so a
         // wall does not change the reading).
 
-        // Run: full stick + RUN held. Target = Lerp(2.5, 4.0, 1.0) = 4.0.
-        // The user's bar is "fast speed na ho": Run must be ~4.0, never 5.81.
+        // Run: full stick + RUN held. Target = Lerp(3.5, 6.5, 1.0) = 6.5.
+        // ROUND 6: the user ordered faster movement after v1.0.7 (walk/run
+        // far too slow on the phone). Accel 5 m/s^2 reaches 6.5 in 1.3 s,
+        // so displacement in 2.5 s is ~12 m (4.2 m ramp + 7.8 m at speed)
+        // — inside the ~15 m clear north lane from spawn.
         Vector3 runStart = player.transform.position;
         yield return MeasureRoutine(pc, moveField, runField, speedProp,
             new Vector2(h, v), true, 2.5f);
@@ -97,26 +100,26 @@ public class PlayerSpeedTest
             new Vector3(runStart.x, 0f, runStart.z));
         Debug.Log("[PlayerSpeedTest] Run mean speed: " + runMean.ToString("F2")
             + " m/s, max: " + runMax.ToString("F2")
-            + " m/s, displacement in 2.5 s: " + runDisp.ToString("F2") + " m (expect ~4.0 / ~8.4 m)");
-        Assert.GreaterOrEqual(runMean, 3.5f, "Run too slow (" + runMean.ToString("F2") + " m/s, expect ~4.0)");
-        Assert.LessOrEqual(runMean, 4.5f, "Run too fast (" + runMean.ToString("F2") + " m/s — user ordered no fast speed, expect ~4.0)");
-        Assert.LessOrEqual(runMax, 4.6f, "Run peaked at " + runMax.ToString("F2") + " m/s — exceeds the 4.0 m/s approved speed");
-        Assert.GreaterOrEqual(runDisp, 4f, "Run displacement only " + runDisp.ToString("F2")
+            + " m/s, displacement in 2.5 s: " + runDisp.ToString("F2") + " m (expect ~6.5 / ~12 m)");
+        Assert.GreaterOrEqual(runMean, 6.0f, "Run too slow (" + runMean.ToString("F2") + " m/s, expect ~6.5)");
+        Assert.LessOrEqual(runMean, 7.0f, "Run too fast (" + runMean.ToString("F2") + " m/s, expect ~6.5)");
+        Assert.LessOrEqual(runMax, 7.1f, "Run peaked at " + runMax.ToString("F2") + " m/s — exceeds the 6.5 m/s approved speed");
+        Assert.GreaterOrEqual(runDisp, 8f, "Run displacement only " + runDisp.ToString("F2")
             + " m in 2.5 s — the player is not actually moving at run speed (blocked?)");
 
-        // Jog: full stick, no run. Target = Lerp(1.4, 2.5, 1.0) = 2.5.
+        // Jog: full stick, no run. Target = Lerp(2.0, 3.5, 1.0) = 3.5.
         yield return MeasureRoutine(pc, moveField, runField, speedProp,
             new Vector2(h, v), false, 2.5f);
-        Debug.Log("[PlayerSpeedTest] Jog mean speed: " + m_mean.ToString("F2") + " m/s (expect ~2.5)");
-        Assert.GreaterOrEqual(m_mean, 2.1f, "Jog too slow (" + m_mean.ToString("F2") + " m/s, expect ~2.5)");
-        Assert.LessOrEqual(m_mean, 2.9f, "Jog too fast (" + m_mean.ToString("F2") + " m/s, expect ~2.5)");
+        Debug.Log("[PlayerSpeedTest] Jog mean speed: " + m_mean.ToString("F2") + " m/s (expect ~3.5)");
+        Assert.GreaterOrEqual(m_mean, 3.1f, "Jog too slow (" + m_mean.ToString("F2") + " m/s, expect ~3.5)");
+        Assert.LessOrEqual(m_mean, 3.9f, "Jog too fast (" + m_mean.ToString("F2") + " m/s, expect ~3.5)");
 
-        // Walk: half stick (mag 0.4), no run. Target = 1.4 * (0.4/0.5) = 1.12.
+        // Walk: half stick (mag 0.4), no run. Target = 2.0 * (0.4/0.5) = 1.6.
         yield return MeasureRoutine(pc, moveField, runField, speedProp,
             new Vector2(h * 0.4f, v * 0.4f), false, 2.5f);
-        Debug.Log("[PlayerSpeedTest] Walk mean speed: " + m_mean.ToString("F2") + " m/s (expect ~1.12)");
-        Assert.GreaterOrEqual(m_mean, 0.8f, "Walk too slow (" + m_mean.ToString("F2") + " m/s, expect ~1.12)");
-        Assert.LessOrEqual(m_mean, 1.5f, "Walk too fast (" + m_mean.ToString("F2") + " m/s, expect ~1.12)");
+        Debug.Log("[PlayerSpeedTest] Walk mean speed: " + m_mean.ToString("F2") + " m/s (expect ~1.6)");
+        Assert.GreaterOrEqual(m_mean, 1.3f, "Walk too slow (" + m_mean.ToString("F2") + " m/s, expect ~1.6)");
+        Assert.LessOrEqual(m_mean, 1.9f, "Walk too fast (" + m_mean.ToString("F2") + " m/s, expect ~1.6)");
 
         // Stop the player so later tests start clean.
         moveField.SetValue(pc, Vector2.zero);

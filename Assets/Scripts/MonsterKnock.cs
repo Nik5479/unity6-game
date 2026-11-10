@@ -277,7 +277,9 @@ public class MonsterKnock : MonoBehaviour
     // trigger on player-outside-at-night alone, with no vision or
     // hearing). Three ways to be noticed:
     //  - PROXIMITY (< 2.5 m): it feels you, even in the dark.
-    //  - HEARING: running footsteps (player speed > 3 m/s) within 14 m.
+    //  - HEARING: running footsteps (player speed > 4.5 m/s) within 14 m.
+    //    ROUND 6: was > 3.0 m/s, but Jog is now 3.5 m/s — jogging must
+    //    stay quiet; only a full Run (6.5 m/s) is loud enough to hear.
     //  - SIGHT: within 20 m, inside a ~150-degree forward cone, with a
     //    clear line of sight (walls and houses block it — the same
     //    CanMoveTo walkability the pathfinder uses).
@@ -288,7 +290,7 @@ public class MonsterKnock : MonoBehaviour
         float dist = toPlayer.magnitude;
         if (dist < 2.5f) return true;
         PlayerController pc = player.GetComponent<PlayerController>();
-        if (pc != null && pc.CurrentSpeed > 3.0f && dist < 14f) return true;
+        if (pc != null && pc.CurrentSpeed > 4.5f && dist < 14f) return true;
         if (dist < 20f)
         {
             float angle = Vector3.Angle(monster.forward, toPlayer);

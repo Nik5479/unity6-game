@@ -12,13 +12,19 @@ using UnityEngine;
 /// </summary>
 public class PlayerController : MonoBehaviour
 {
-    // Phase 1 real-world speeds (2026-11-08): a human walks ~1.4 m/s,
-    // jogs ~2.5 m/s and runs ~4.0 m/s. The old 5 m/s walk / 9 m/s run
-    // made Nilesh cross the whole village in seconds and looked
-    // nothing like a person (owner's phone video).
-    public const float WalkSpeed = 1.4f;
-    public const float JogSpeed = 2.5f;
-    public const float RunSpeed = 4.0f;
+    // ROUND 6 (2026-11-10): GTA-like speeds — the user's v1.0.7 phone
+    // verdict was "chalne me run karne me kitna slow ho jata hai"
+    // (walk/run far too slow on the phone). The old 1.4 / 2.5 / 4.0
+    // were real-world walking speeds, but the village is ~44 m across
+    // and the phone video showed Nilesh covering almost no ground in
+    // 35 s. Walk 2.0 / Jog 3.5 / Run 6.5 m/s: a run still takes ~7 s
+    // to cross the village (no teleporting), but the game finally
+    // feels like GTA instead of a slow shuffle. Supersedes the old
+    // "fast speed na ho" order (Round 4) — the user explicitly asked
+    // for faster movement after playing v1.0.7.
+    public const float WalkSpeed = 2.0f;
+    public const float JogSpeed = 3.5f;
+    public const float RunSpeed = 6.5f;
     // Acceleration / deceleration (m/s^2): reaching jog takes ~0.5 s,
     // stopping ~0.35 s — GTA weight, no more instant full speed / dead
     // stops. (ROUND 4 WALK: was 8/10 — too twitchy.)
