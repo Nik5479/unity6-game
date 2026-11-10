@@ -58,6 +58,26 @@ public class AnimalRoam : MonoBehaviour
         lastPos = transform.position;
         PickTarget();
         pauseT = Random.Range(1f, 3f);
+        // ROUND 6 (aar-paar): I am solid — the player (and NPCs) must
+        // not walk through me. Radius from my own rendered footprint
+        // (cow/buffalo/horse are wide, chicken is small), clamped to
+        // a sane band. Registered in Start, after Awake removed my
+        // static FullBounds entry.
+        float r = 0.5f;
+        Renderer[] rs = GetComponentsInChildren<Renderer>();
+        if (rs.Length > 0)
+        {
+            Bounds b = rs[0].bounds;
+            foreach (Renderer rr in rs) b.Encapsulate(rr.bounds);
+            r = Mathf.Clamp(Mathf.Max(b.size.x, b.size.z) / 2f, 0.3f, 0.8f);
+        }
+        VillageColliders.RegisterDynamic(transform, r);
+    }
+
+    // ROUND 6 (aar-paar): unregister my dynamic blocker when I go away.
+    void OnDestroy()
+    {
+        VillageColliders.UnregisterDynamic(transform);
     }
 
     // PHONE-VIDEO FIX: remove my own FullBounds entry from the shared
@@ -172,15 +192,17 @@ public class AnimalRoam : MonoBehaviour
         GltfModelLoader.PlayEmbeddedAnimation(gameObject, name);
     }
 
-    // Same axis-separated slide as PlayerController.
+    // Same axis-separated slide as PlayerController — but dynamic:
+    // NPCs, other animals and the monster block me too (ignore = my
+    // own transform, so I never block myself).
     private void TryMove(ref Vector3 p, Vector3 step)
     {
         Vector3 full = new Vector3(p.x + step.x, p.y, p.z + step.z);
-        if (VillageColliders.CanMoveTo(full, 0.4f)) { p = full; return; }
+        if (VillageColliders.CanMoveToDynamic(full, 0.4f, transform)) { p = full; return; }
         Vector3 onlyX = new Vector3(p.x + step.x, p.y, p.z);
-        if (VillageColliders.CanMoveTo(onlyX, 0.4f)) { p = onlyX; return; }
+        if (VillageColliders.CanMoveToDynamic(onlyX, 0.4f, transform)) { p = onlyX; return; }
         Vector3 onlyZ = new Vector3(p.x, p.y, p.z + step.z);
-        if (VillageColliders.CanMoveTo(onlyZ, 0.4f)) { p = onlyZ; }
+        if (VillageColliders.CanMoveToDynamic(onlyZ, 0.4f, transform)) { p = onlyZ; }
     }
 
     private static Vector3 Flat(Vector3 v) { return new Vector3(v.x, 0f, v.z); }

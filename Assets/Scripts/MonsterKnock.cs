@@ -61,6 +61,32 @@ public class MonsterKnock : MonoBehaviour
         return player != null && !GameManager.IsInsidePlayerHouse(player.position);
     }
 
+    // ROUND 6 (aar-paar): the monster blocks the player while it is out
+    // (visible). It starts HIDDEN (inactive) — an inactive monster must
+    // NOT block the lair, or the player would bump into an invisible
+    // wall during the day. Synced every frame from activeSelf.
+    private bool blockerRegistered;
+    private void SyncMonsterBlocker()
+    {
+        if (monster == null) return;
+        bool active = monster.gameObject.activeSelf;
+        if (active && !blockerRegistered)
+        {
+            VillageColliders.RegisterDynamic(monster, 0.55f);
+            blockerRegistered = true;
+        }
+        else if (!active && blockerRegistered)
+        {
+            VillageColliders.UnregisterDynamic(monster);
+            blockerRegistered = false;
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (blockerRegistered) VillageColliders.UnregisterDynamic(monster);
+    }
+
     public void BeginNight()
     {
         if (monster == null || door == null) return;
@@ -77,6 +103,9 @@ public class MonsterKnock : MonoBehaviour
 
     void Update()
     {
+        // ROUND 6: keep my dynamic blocker in sync with visibility
+        // (hidden monster = no blocker) even while idle at stage 0.
+        SyncMonsterBlocker();
         if (stage == 0 || monster == null) return;
         t += Time.deltaTime;
 

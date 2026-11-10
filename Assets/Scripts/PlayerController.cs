@@ -247,21 +247,21 @@ public class PlayerController : MonoBehaviour
         float feetY = p.y - 0.5f;
         Vector3 full = new Vector3(p.x + step.x, p.y, p.z + step.z);
         if (VillageColliders.GroundHeightAt(full.x, full.z) <= feetY + StepUp
-            && VillageColliders.CanMoveTo(full, kRadius))
+            && VillageColliders.CanMoveToDynamic(full, kRadius, null))
         {
             p = full;
             return;
         }
         Vector3 onlyX = new Vector3(p.x + step.x, p.y, p.z);
         if (VillageColliders.GroundHeightAt(onlyX.x, onlyX.z) <= feetY + StepUp
-            && VillageColliders.CanMoveTo(onlyX, kRadius))
+            && VillageColliders.CanMoveToDynamic(onlyX, kRadius, null))
         {
             p = onlyX;
             return;
         }
         Vector3 onlyZ = new Vector3(p.x, p.y, p.z + step.z);
         if (VillageColliders.GroundHeightAt(onlyZ.x, onlyZ.z) <= feetY + StepUp
-            && VillageColliders.CanMoveTo(onlyZ, kRadius))
+            && VillageColliders.CanMoveToDynamic(onlyZ, kRadius, null))
         {
             p = onlyZ;
         }

@@ -74,6 +74,11 @@ public class NpcRoutine : MonoBehaviour
         if (p != null) player = p.transform;
         lastPos = transform.position;
         walkGoal = transform.position;
+        // ROUND 6 (aar-paar): I am solid — the player (and other NPCs)
+        // must not walk through me. A dynamic circle follows me; the
+        // player checks it via CanMoveToDynamic. Radius 0.45 m matches
+        // the 0.4 m walk radius the pathfinder uses for me.
+        VillageColliders.RegisterDynamic(transform, 0.45f);
         // PHONE-VIDEO FIX: loud spawn check. An NPC whose spawn sits inside
         // a registered blocker (Villager_Man: home (6.5, 10.5) is inside
         // House_2's footprint x[3.22, 14.78] z[2.23, 13.77]) can never take
@@ -186,6 +191,13 @@ public class NpcRoutine : MonoBehaviour
         walking = true;
     }
 
+    // ROUND 6 (aar-paar): unregister my dynamic blocker when I go away
+    // (scene reload / destroy) so no stale entry blocks the player.
+    void OnDestroy()
+    {
+        VillageColliders.UnregisterDynamic(transform);
+    }
+
     private void WalkTo(Vector3 target, float dt)
     {
         repathT -= dt;
@@ -265,15 +277,17 @@ public class NpcRoutine : MonoBehaviour
         transform.position = p;
     }
 
-    // Same axis-separated slide as PlayerController.
+    // Same axis-separated slide as PlayerController — but dynamic:
+    // other NPCs, animals and the monster block me too (ignore = my
+    // own transform, so I never block myself).
     private void TryMove(ref Vector3 p, Vector3 step)
     {
         Vector3 full = new Vector3(p.x + step.x, p.y, p.z + step.z);
-        if (VillageColliders.CanMoveTo(full, 0.4f)) { p = full; return; }
+        if (VillageColliders.CanMoveToDynamic(full, 0.4f, transform)) { p = full; return; }
         Vector3 onlyX = new Vector3(p.x + step.x, p.y, p.z);
-        if (VillageColliders.CanMoveTo(onlyX, 0.4f)) { p = onlyX; return; }
+        if (VillageColliders.CanMoveToDynamic(onlyX, 0.4f, transform)) { p = onlyX; return; }
         Vector3 onlyZ = new Vector3(p.x, p.y, p.z + step.z);
-        if (VillageColliders.CanMoveTo(onlyZ, 0.4f)) { p = onlyZ; }
+        if (VillageColliders.CanMoveToDynamic(onlyZ, 0.4f, transform)) { p = onlyZ; }
     }
 
     private void FaceDir(Vector3 dir, float dt)

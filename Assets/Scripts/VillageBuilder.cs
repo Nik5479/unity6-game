@@ -75,10 +75,59 @@ public static class VillageColliders
         return false;
     }
 
+    // ROUND 6 (aar-paar, 2026-11-10): dynamic blockers — NPCs, animals
+    // and the monster. They MOVE, so a static Bounds entry can never
+    // follow them, and registering their FullBounds froze them (the
+    // animal's own-bounds bug: its position sat at the centre of its
+    // own blocker, so every step failed). A dynamic blocker is a
+    // circle (XZ) that follows a Transform; CanMoveToDynamic checks
+    // static blocks AND dynamics. The pathfinder keeps using
+    // static-only CanMoveTo — paths are planned over fixed geometry,
+    // dynamic avoidance is per-step. The PLAYER is never a dynamic
+    // blocker (the monster must be able to reach him for game over).
+    private struct DynamicBlock { public Transform t; public float radius; public float yMin; public float yMax; }
+    private static readonly List<DynamicBlock> s_dynamics = new List<DynamicBlock>();
+
+    public static void RegisterDynamic(Transform t, float radius)
+    {
+        if (t == null) return;
+        for (int i = 0; i < s_dynamics.Count; i++)
+            if (s_dynamics[i].t == t) return; // already registered
+        s_dynamics.Add(new DynamicBlock { t = t, radius = radius, yMin = 0f, yMax = 2.2f });
+    }
+
+    public static void UnregisterDynamic(Transform t)
+    {
+        for (int i = s_dynamics.Count - 1; i >= 0; i--)
+            if (s_dynamics[i].t == t) { s_dynamics.RemoveAt(i); return; }
+    }
+
+    public static int DynamicBlockerCount { get { return s_dynamics.Count; } }
+
+    // Circle (XZ) vs static AABBs AND dynamic circles. `ignore` is the
+    // mover's own transform — an NPC must not block itself.
+    public static bool CanMoveToDynamic(Vector3 pos, float radius, Transform ignore)
+    {
+        if (!CanMoveTo(pos, radius)) return false;
+        float feetY = pos.y - 0.5f;
+        float headY = pos.y + 1.3f;
+        foreach (DynamicBlock d in s_dynamics)
+        {
+            if (d.t == null || d.t == ignore) continue;
+            if (feetY >= d.yMax || headY <= d.yMin) continue;
+            float dx = pos.x - d.t.position.x;
+            float dz = pos.z - d.t.position.z;
+            float rr = radius + d.radius;
+            if (dx * dx + dz * dz < rr * rr) return false;
+        }
+        return true;
+    }
+
     public static void Clear()
     {
         s_blocks.Clear();
         s_walkables.Clear();
+        s_dynamics.Clear();
     }
 
     // Camera collision (audit M1): ray vs the registered blocking volumes
