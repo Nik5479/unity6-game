@@ -2826,11 +2826,16 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("hindustan_ambassador_4_rh04.glb", "HeroCar",
             new Vector3(2.5f, 0f, 15f), 30f, 1.5f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
-        // Ancient gate at the north lane entrance — no collider, so the
-        // player can walk through the arch.
+        // Ancient gate at the north lane entrance — a SOLID stair
+        // monument (verified from ancient_gate_11_4q5m.glb: one mesh,
+        // 2.8 m wide x 2.9 m deep x 4.5 m tall, solid from the ground
+        // up — there is no arch to walk through). FullBounds, so the
+        // player walks up the lane and stops at the gate instead of
+        // passing through the stone. ROUND 6: was None ("walk through
+        // the arch") — the arch does not exist in the mesh.
         yield return LoadProp("ancient_gate_11_4q5m.glb", "Gate",
             new Vector3(0f, 0f, 20.5f), 0f, 4.5f,
-            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
         // Small props near the houses.
         // Placement fix 2026-11-07: the handpump sat at (5, 9), 0.25 m
         // from the east fence rail. Now (4.5, 9): clear of the fence.
@@ -2845,7 +2850,7 @@ public class VillageBuilder : MonoBehaviour
         // from the wolf, 4.3 m from the chicken's new spot.
         yield return LoadProp("indian_terracotta_matka_red_clay_water_pot_40_ris7.glb", "Matka",
             new Vector3(-4.2f, 0f, 9.2f), 0f, 0.5f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None,
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds,
             MuteMatka);
         // PHONE-VIDEO FIX 2026-11-09: was (7.5, 3.5) — INSIDE House_2
         // (11.5 m wide, x[3.22,14.78] z[2.23,13.77]). Now south of it.
@@ -3780,6 +3785,20 @@ public class VillageBuilder : MonoBehaviour
         RegisterBlockFromBounds(temple, "Object_32", 10f); // lower walls
         RegisterBlockFromBounds(temple, "Object_30", 10f); // middle tower
         RegisterBlockFromBounds(temple, "Object_34", 0f);  // upper block
+        // ROUND 6 (aar-paar): the gateway bell tower north of the
+        // plinth (Object_39 pillar_bell + the hanging bell Object_49).
+        // Measured from hindu_temple_88_62er.glb: the tower stands at
+        // x 0.31..3.99, z -11.19..-9.9, 0..6.59 m — a solid bell
+        // pavilion the player must walk AROUND, not through. One block
+        // from the base part extended to the tower top (the base is
+        // the widest part) plus the bell itself (y 1.74..3.09 — the
+        // player is 1.8 m tall, so he cannot walk under it). The
+        // plinth steps stay open: the tower stands 0.86 m north of
+        // the plinth's north edge (-12.05) and the steps span the
+        // plinth's full width, so the player reaches them around
+        // either side.
+        RegisterBlockFromBounds(temple, "Object_39", 6.6f);
+        RegisterBlockFromBounds(temple, "Object_49", 0f);
     }
 
     private static void RegisterWalkableFromBounds(GameObject root, string childName)
@@ -3887,6 +3906,12 @@ public class VillageBuilder : MonoBehaviour
         yield return LoadProp("granite_figure_of_a_nandi_bull_3_3z0y.glb", "Nandi",
             new Vector3(2f, 0f, -8.8f), 180f, 1.2f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None);
+        // ROUND 6 (aar-paar): the Nandi is a solid granite bull in the
+        // courtyard — the player must walk around it, not through it.
+        // Block from its own rendered bounds (None mode keeps the
+        // load, the block is the collision).
+        GameObject nandiGO = GameObject.Find("Nandi");
+        if (nandiGO != null) VillageColliders.Register(GetWorldBounds(nandiGO));
         // Pujari at the temple entrance, facing the chowk.
         // Phase 1: moved with the temple front to (4.5, -8.5) — just
         // outside the entrance, still east of the Nandi-shivling
@@ -3980,7 +4005,7 @@ public class VillageBuilder : MonoBehaviour
         // Small props: wicker basket by the well, wooden stand by Nilesh's door.
         yield return LoadProp("historic_miscellaneous_basket_wicker_old_03_xdwjadj_mid_51_y3o8.glb", "Basket",
             new Vector3(-3f, 0f, -1.5f), 30f, 0.7f,
-            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.None);
+            GltfModelLoader.NormalizeMode.ByWidth, GltfModelLoader.ColliderMode.FullBounds);
         yield return LoadProp("historic_miscellaneous_stand_wood_old_05_xeokah0_mid_50_69zs.glb", "WoodStand",
             new Vector3(-5.5f, 0f, 3.5f), -20f, 1.1f,
             GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.FullBounds);
@@ -4081,6 +4106,9 @@ public class VillageBuilder : MonoBehaviour
             GameObject pine = InstantiateResourceModel("FallenPine/FallenPine", "FallenPine",
                 new Vector3(-18f, 0f, 18f), 40f, 4f, false);
             if (pine == null) Debug.LogWarning("[Village] Fallen pine FBX not placed");
+            // ROUND 6 (aar-paar): a fallen trunk is solid — the player
+            // must walk around it, not through it.
+            else VillageColliders.Register(GetWorldBounds(pine));
         });
         RunStep("SmallGrave", delegate
         {
@@ -4093,6 +4121,8 @@ public class VillageBuilder : MonoBehaviour
             GameObject grave = InstantiateResourceModel("SmallGrave/SmallGrave", "SmallGrave",
                 new Vector3(18f, 0f, -21.5f), -30f, 2.2f, false);
             if (grave == null) Debug.LogWarning("[Village] Small grave FBX not placed");
+            // ROUND 6 (aar-paar): a grave slab is solid ground furniture.
+            else VillageColliders.Register(GetWorldBounds(grave));
         });
     }
 
