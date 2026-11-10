@@ -560,6 +560,50 @@ public class ScreenshotTest
         Assert.IsNotNull(shot12, "Screenshot 12 (player inside) failed to render");
         Assert.IsTrue(File.Exists(shot12), "Screenshot 12 file missing: " + shot12);
 
+        // ROUND 6 (door visuals + bell tower): three new shots proving
+        // the hut fixes. The door is still open from shot 11/12.
+        // Shot 15: the hut's east face from the north-east — the open
+        // door AND the framed east window in one frame, the same angle
+        // as the user's phone screenshot (door open, hut looks broken).
+        // The player stands just outside his door, in frame.
+        player.transform.position = new Vector3(doorCenterShot.x + 1.5f, 0.5f, doorCenterShot.z);
+        yield return null;
+        yield return null;
+        Behaviour follow15 = cam.GetComponent("CameraFollow") as Behaviour;
+        if (follow15 != null) follow15.enabled = false;
+        cam.transform.position = new Vector3(doorCenterShot.x + 4.5f, 2.2f, doorCenterShot.z + 3.0f);
+        cam.transform.LookAt(new Vector3(doorCenterShot.x, 1.0f, doorCenterShot.z + 0.8f));
+        yield return null;
+        string shot15 = RenderScreenshot(cam, "hut-door-window.png", 1280, 720);
+        Assert.IsNotNull(shot15, "Screenshot 15 (hut door + window) failed to render");
+        Assert.IsTrue(File.Exists(shot15), "Screenshot 15 file missing: " + shot15);
+        // Shot 16: through the OPEN doorway from outside — the warm
+        // doorway (matDoorwayWarm + HutDoorLight) and the lit interior,
+        // not a black hole. The player stands inside, visible through
+        // the doorway.
+        player.transform.position = new Vector3(doorCenterShot.x - 3.0f, 0.5f, doorCenterShot.z);
+        yield return null;
+        yield return null;
+        cam.transform.position = new Vector3(doorCenterShot.x + 3.5f, 1.6f, doorCenterShot.z);
+        cam.transform.LookAt(new Vector3(doorCenterShot.x - 2f, 1.0f, doorCenterShot.z));
+        yield return null;
+        string shot16 = RenderScreenshot(cam, "hut-interior-doorway.png", 1280, 720);
+        Assert.IsNotNull(shot16, "Screenshot 16 (interior through doorway) failed to render");
+        Assert.IsTrue(File.Exists(shot16), "Screenshot 16 file missing: " + shot16);
+        // Shot 17: the temple bell tower from the north (chowk side) —
+        // the solid bell pavilion that Round 6 blocked, with the temple
+        // shikhar behind it. Proves the tower is a real structure the
+        // player walks around, not a walk-through ghost.
+        cam.transform.position = new Vector3(2f, 3f, -4f);
+        cam.transform.LookAt(new Vector3(2f, 3.5f, -11f));
+        yield return null;
+        string shot17 = RenderScreenshot(cam, "temple-bell-tower.png", 1280, 720);
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (follow15 != null) follow15.enabled = true;
+        Assert.IsNotNull(shot17, "Screenshot 17 (temple bell tower) failed to render");
+        Assert.IsTrue(File.Exists(shot17), "Screenshot 17 file missing: " + shot17);
+
         // ROUND 4 follow-up (dusk/night shots were obstructed): shots
         // 11/12 leave the player INSIDE his house, so the gameplay
         // camera (3.4 m behind him, collision-clamped to 1.2 m inside
@@ -616,7 +660,7 @@ public class ScreenshotTest
         Assert.IsNotNull(shot4, "Night angle-2 screenshot failed to render");
         Assert.IsTrue(File.Exists(shot4), "Night angle-2 screenshot file missing: " + shot4);
 
-        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot13 + " | " + shot11 + " | " + shot12 + " | " + shot10 + " | " + shot3 + " | " + shot4);
+        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot13 + " | " + shot11 + " | " + shot12 + " | " + shot15 + " | " + shot16 + " | " + shot17 + " | " + shot10 + " | " + shot3 + " | " + shot4);
         yield return null;
     }
 
