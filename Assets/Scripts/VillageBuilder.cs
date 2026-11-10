@@ -280,6 +280,9 @@ public class VillageBuilder : MonoBehaviour
     private Material matPants;
     private Material matEye;
     private Material matLampGlass;
+    // ROUND 6 (door visuals): warm dark-brown + dim glow for the open
+    // doorway's dark quad — the near-black matDark read as a black hole.
+    private Material matDoorwayWarm;
     // OVERNIGHT R1: weathered dark grey-brown iron for the lamp pole /
     // frame. The old matDark (0.02 near-black) pole + emissive-yellow
     // head cube read as "black pole + yellow cube" by day (audit).
@@ -1157,6 +1160,12 @@ public class VillageBuilder : MonoBehaviour
         matPants = MakeFlat("Pants", new Color(0.18f, 0.16f, 0.14f), 0.4f);
         matEye = MakeEmissive("MonsterEyes", new Color(0.9f, 0.85f, 0.6f), new Color(1.4f, 1.1f, 0.35f));
         matLampGlass = MakeEmissive("LampGlass", new Color(1f, 0.85f, 0.55f), new Color(1.3f, 0.8f, 0.3f));
+        // ROUND 6 (door visuals): the open doorway's dark quad used
+        // matDark (near-black 0.02) — in the phone photo it read as a
+        // black hole, so the open door looked broken. Warm dark-brown
+        // with a dim warm glow: the doorway now reads as a lamp-lit
+        // interior instead of a void.
+        matDoorwayWarm = MakeEmissive("DoorwayWarm", new Color(0.16f, 0.10f, 0.06f), new Color(0.30f, 0.14f, 0.05f));
         // OVERNIGHT R1: lamp iron — dark grey-brown, not near-black.
         matLampPole = MakeFlat("LampPole", new Color(0.30f, 0.27f, 0.23f), 0.35f);
         // PHONE-VIDEO 2026-11-09: matMudFlat (OVERNIGHT R3, texture-less
@@ -2121,7 +2130,15 @@ public class VillageBuilder : MonoBehaviour
             // player walks through darkness into the interior. Single-
             // sided (faces east) so it never blocks the view OUT from
             // inside. Hidden while closed, so the wooden panel shows.
-            if (matDark != null)
+            // ROUND 6 (door visuals): the quad's material was matDark
+            // (near-black) — the open doorway read as a black hole in
+            // the phone photo. matDoorwayWarm is a warm dark-brown with
+            // a dim glow, so the doorway reads as a lamp-lit interior.
+            // The quad STAYS: the model's wall is solid behind the
+            // builder's doorway, and without it the player would see
+            // straight through the hut's back wall.
+            Material dqMat = matDoorwayWarm != null ? matDoorwayWarm : matDark;
+            if (dqMat != null)
             {
                 GameObject darkQuad = new GameObject("House_Player_DoorwayDark");
                 darkQuad.transform.SetParent(villageRoot, false);
@@ -2131,7 +2148,7 @@ public class VillageBuilder : MonoBehaviour
                 MeshRenderer dqR = darkQuad.AddComponent<MeshRenderer>();
                 MeshFilter dqF = darkQuad.AddComponent<MeshFilter>();
                 dqF.mesh = BuildQuadMesh();
-                dqR.material = matDark;
+                dqR.material = dqMat;
                 darkQuad.SetActive(false);
                 if (playerDoor != null) playerDoor.doorwayDark = darkQuad;
             }
@@ -2150,7 +2167,7 @@ public class VillageBuilder : MonoBehaviour
             Light diyaLight = diyaLightGO.AddComponent<Light>();
             diyaLight.type = LightType.Point;
             diyaLight.color = new Color(1f, 0.6f, 0.25f);
-            diyaLight.intensity = 0.7f;
+            diyaLight.intensity = 1.0f; // ROUND 6 (door visuals): was 0.7 — brighter, the open doorway must read as lit.
             diyaLight.range = 5f;
             // ROUND 4 DOOR: persistent marker over the player's house —
             // a warm amber glow above the roof peak, so the player can
@@ -2159,6 +2176,39 @@ public class VillageBuilder : MonoBehaviour
             houseMarkerGlow = MakeGlowQuad("House_Player_Marker",
                 new Vector3(hb.center.x, hb.max.y + 0.8f, hb.center.z), 1.6f,
                 new Color(1f, 0.65f, 0.15f, 0.55f));
+            // ROUND 6 (door visuals): the hut's windows were ragged
+            // boolean-cut holes in the phone photo — frame each one in
+            // wood so the torn edge reads as a proper window. Positions
+            // measured from thatched_hut_4_p31g.glb (the Cube /
+            // Material.003 bar assemblies mark each opening; the east
+            // opening is the big ground-level hole at z 7.1..8.0).
+            // The builder's door stays at z=6 — the east opening is
+            // only 1.5 m tall, the 1.8 m player would clip its lintel.
+            FrameHutWindow(wb, "East", 7.55f, 0f, 1.5f, 0.45f);
+            FrameHutWindow(wb, "North", -11.22f, 0.74f, 1.54f, 0.33f);
+            FrameHutWindow(wb, "West", 7.96f, 0.67f, 1.45f, 0.32f);
+            FrameHutWindow(wb, "West", 4.18f, 0.65f, 1.43f, 0.33f);
+            FrameHutWindow(wb, "South", -11.16f, 0.74f, 1.53f, 0.33f);
+            // ROUND 6 (door visuals): warm light just inside the doorway
+            // so the open door shows a lit interior, not darkness.
+            AddPointLight("HutDoorLight", new Vector3(wb.max.x - 0.8f, 1.6f, 6f),
+                new Color(1f, 0.55f, 0.2f), 1.2f, 4f);
+            // ROUND 6 (door visuals): dark thatch underlay under the hut
+            // roof. The thatch is 4 separate plates with gaps between
+            // them — the gaps read as black holes in the phone photo
+            // ('roof messy'). A dark-brown pyramid just inside the
+            // thatch (base 8.4 x 7.4 m at the eave, apex at the ridge)
+            // fills every gap with dark thatch instead of void.
+            // Double-sided (visible from inside the hut too).
+            GameObject roofUnder = new GameObject("HutRoofUnderlay");
+            roofUnder.transform.SetParent(villageRoot, false);
+            roofUnder.transform.position = new Vector3(-9f, 1.58f, 6f);
+            MeshFilter ruF = roofUnder.AddComponent<MeshFilter>();
+            ruF.mesh = BuildPyramidMesh(4.2f, 3.7f, 2.28f);
+            MeshRenderer ruR = roofUnder.AddComponent<MeshRenderer>();
+            Material underMat = MakeFlat("ThatchUnder", new Color(0.23f, 0.16f, 0.10f), 0f);
+            if (underMat != null) underMat.SetFloat("_Cull", 0f);
+            ruR.material = underMat;
         }
         else
         {
@@ -2359,6 +2409,69 @@ public class VillageBuilder : MonoBehaviour
             BuildDoor(root, center, doorX, doorSide, doorW, doorH);
             BuildHouseInterior(root, center, w, d);
         }
+    }
+
+    // ROUND 6 (door visuals): frame a REAL hut window with wooden trim
+    // so the ragged boolean-cut edge of the .glb opening reads as a
+    // proper window instead of torn mud. The hut's windows were
+    // measured from thatched_hut_4_p31g.glb — the Cube/Material.003
+    // bar assemblies mark each opening. face = which wall the window
+    // is on ("East"/"West"/"North"/"South"); uCentre = the window's
+    // centre along that wall (world coords); y0/y1 = the opening's
+    // bottom/top; halfW = half the opening's width. Trim sits 0.08 m
+    // proud of the wall face, covering the torn edge. A ground-level
+    // opening (y0 ~ 0) gets no sill — it meets the ground. Visual
+    // only (Box()); no collider is registered.
+    private void FrameHutWindow(Bounds wb, string face, float uCentre, float y0, float y1, float halfW)
+    {
+        float t = 0.12f;     // trim thickness
+        float proud = 0.08f; // how far the trim stands off the wall face
+        float yMid = (y0 + y1) * 0.5f;
+        float h = (y1 - y0) + 2f * t;  // post height (lintel-to-sill span)
+        float w = 2f * halfW + 2f * t; // lintel/sill length (post-to-post)
+        string tag = "Win" + face + ((int)(uCentre * 10f)).ToString();
+        if (face == "East" || face == "West")
+        {
+            float x = face == "East" ? wb.max.x + proud : wb.min.x - proud;
+            Box("Hut" + tag + "PostA", new Vector3(x, yMid, uCentre - (halfW + t * 0.5f)), new Vector3(t, h, t), matWood, villageRoot);
+            Box("Hut" + tag + "PostB", new Vector3(x, yMid, uCentre + (halfW + t * 0.5f)), new Vector3(t, h, t), matWood, villageRoot);
+            Box("Hut" + tag + "Lintel", new Vector3(x, y1 + t * 0.5f, uCentre), new Vector3(t, t, w), matWood, villageRoot);
+            if (y0 > 0.05f)
+                Box("Hut" + tag + "Sill", new Vector3(x, y0 - t * 0.5f, uCentre), new Vector3(t, t, w), matWood, villageRoot);
+        }
+        else
+        {
+            float z = face == "North" ? wb.max.z + proud : wb.min.z - proud;
+            Box("Hut" + tag + "PostA", new Vector3(uCentre - (halfW + t * 0.5f), yMid, z), new Vector3(t, h, t), matWood, villageRoot);
+            Box("Hut" + tag + "PostB", new Vector3(uCentre + (halfW + t * 0.5f), yMid, z), new Vector3(t, h, t), matWood, villageRoot);
+            Box("Hut" + tag + "Lintel", new Vector3(uCentre, y1 + t * 0.5f, z), new Vector3(w, t, t), matWood, villageRoot);
+            if (y0 > 0.05f)
+                Box("Hut" + tag + "Sill", new Vector3(uCentre, y0 - t * 0.5f, z), new Vector3(w, t, t), matWood, villageRoot);
+        }
+    }
+
+    // ROUND 6 (door visuals): a 4-sided pyramid mesh (4 side triangles,
+    // no base) — the dark thatch underlay under the hut roof. Wound so
+    // the normals point outward (RecalculateNormals from the winding);
+    // the material is set double-sided anyway (visible from inside too).
+    private Mesh BuildPyramidMesh(float halfX, float halfZ, float height)
+    {
+        Vector3 apex = new Vector3(0f, height, 0f);
+        Vector3 c0 = new Vector3(-halfX, 0f, -halfZ);
+        Vector3 c1 = new Vector3(halfX, 0f, -halfZ);
+        Vector3 c2 = new Vector3(halfX, 0f, halfZ);
+        Vector3 c3 = new Vector3(-halfX, 0f, halfZ);
+        Mesh m = new Mesh();
+        m.name = "Pyramid";
+        m.vertices = new Vector3[] {
+            apex, c1, c0,   // south face (-z)
+            apex, c2, c1,   // east face (+x)
+            apex, c3, c2,   // north face (+z)
+            apex, c0, c3    // west face (-x)
+        };
+        m.triangles = new int[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+        m.RecalculateNormals();
+        return m;
     }
 
     // Window glass + wood frame (top/bottom rails, side posts, cross bars).
