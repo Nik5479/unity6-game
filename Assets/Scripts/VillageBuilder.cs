@@ -4490,14 +4490,15 @@ public class VillageBuilder : MonoBehaviour
         try
         {
             QualitySettings.shadows = ShadowQuality.All;
-            // ROUND 5 (lag): shadow distance 45 -> 30 m. The shadow map
-            // covers a 45 m radius today — nearly every object in the
-            // village renders into it a second time, which is the
-            // predictable cause of the walking lag on the phone (draw
-            // calls, not triangles: ~0.62M tris is fine for the GPU).
-            // 30 m still covers the player's surroundings; shadows past
-            // that range simply stop instead of costing a second render.
-            QualitySettings.shadowDistance = 30f;
+            // ROUND 6 (lag): shadow distance 30 -> 20 m. The v1.0.7
+            // phone video showed heavy lag while walking; the shadow
+            // map re-renders the village a second time, and 30 m covers
+            // nearly the whole village. 20 m still covers the player's
+            // surroundings; shadows past that range simply stop instead
+            // of costing a second render. (This runtime force is the
+            // real control — the QualitySettings asset value is
+            // overridden here every launch.)
+            QualitySettings.shadowDistance = 20f;
         }
         catch (System.Exception e)
         {
