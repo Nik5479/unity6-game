@@ -2208,7 +2208,7 @@ public class VillageBuilder : MonoBehaviour
             // 0.41 m. x -9.3 (not -9) keeps it 0.4 m clear of the N-S
             // partition plane at x ~-8.9; z 5.0 sits just south of the
             // E-W partition (z 5.5-5.9), i.e. one lantern per room.
-            // Dimmer on purpose (1.2 / 6.0) — a wash, not a second hero
+            // Dimmer on purpose (1.8 / 6.0) — a wash, not a second hero
             // light — same warm colour, shadowless. Village total goes
             // 10 -> 11 realtime point lights, all shadowless; no object
             // evaluates more than the per-object cap either way.
@@ -2229,7 +2229,7 @@ public class VillageBuilder : MonoBehaviour
             MeshFilter ruF = roofUnder.AddComponent<MeshFilter>();
             ruF.mesh = BuildPyramidMesh(4.2f, 3.7f, 2.28f);
             MeshRenderer ruR = roofUnder.AddComponent<MeshRenderer>();
-            Material underMat = MakeFlat("ThatchUnder", new Color(0.23f, 0.16f, 0.10f), 0f);
+            Material underMat = MakeFlat("ThatchUnder", new Color(0.32f, 0.23f, 0.14f), 0f);
             if (underMat != null) underMat.SetFloat("_Cull", 0f);
             ruR.material = underMat;
         }
