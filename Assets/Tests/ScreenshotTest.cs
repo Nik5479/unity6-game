@@ -718,6 +718,38 @@ public class ScreenshotTest
         Assert.IsNotNull(shot17, "Screenshot 17 (temple bell tower) failed to render");
         Assert.IsTrue(File.Exists(shot17), "Screenshot 17 file missing: " + shot17);
 
+        // VILLAGE EXPANSION (DESIGN §9), shots 19 + 21 — still in day
+        // light (the cycle is only driven to dusk/night further below).
+        // Warnings, not asserts, if a new house is missing — a model-load
+        // flake must not fail the whole test (repo convention).
+        Behaviour follow19 = cam.GetComponent("CameraFollow") as Behaviour;
+        if (follow19 != null) follow19.enabled = false;
+        if (GameObject.Find("House_7") == null) Debug.LogWarning("[Test] Shot 19: House_7 missing — expansion houses did not load");
+        // Shot 19: aerial day — the whole expanded village from above
+        // (new houses + landmarks + lanes in one frame).
+        cam.transform.position = new Vector3(0f, 28f, 18f);
+        cam.transform.LookAt(new Vector3(0f, 0f, 0f));
+        yield return null;
+        string shot19 = RenderScreenshot(cam, "village-aerial-day.png", 1280, 720);
+        Assert.IsNotNull(shot19, "Screenshot 19 (aerial day) failed to render");
+        Assert.IsTrue(File.Exists(shot19), "Screenshot 19 file missing: " + shot19);
+        // Shot 21: hero scale beside House_7 — Nilesh standing next to
+        // the new west house so the house height reads against him.
+        // The player is teleported back to the recorded spawn pose by
+        // the block below (before the dusk/night shots), so this move
+        // does not leak into the rest of the test.
+        player.transform.position = new Vector3(-13f, 0.5f, 7.75f);
+        player.transform.rotation = Quaternion.Euler(0f, 270f, 0f);
+        cam.transform.position = new Vector3(-8.5f, 2f, 7.75f);
+        cam.transform.LookAt(new Vector3(-17.25f, 2f, 7.75f));
+        yield return null;
+        string shot21 = RenderScreenshot(cam, "hero-scale-house7.png", 1280, 720);
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (follow19 != null) follow19.enabled = true;
+        Assert.IsNotNull(shot21, "Screenshot 21 (hero scale) failed to render");
+        Assert.IsTrue(File.Exists(shot21), "Screenshot 21 file missing: " + shot21);
+
         // ROUND 4 follow-up (dusk/night shots were obstructed): shots
         // 11/12 leave the player INSIDE his house, so the gameplay
         // camera (3.4 m behind him, collision-clamped to 1.2 m inside
@@ -774,7 +806,22 @@ public class ScreenshotTest
         Assert.IsNotNull(shot4, "Night angle-2 screenshot failed to render");
         Assert.IsTrue(File.Exists(shot4), "Night angle-2 screenshot file missing: " + shot4);
 
-        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot13 + " | " + shot11 + " | " + shot12 + " | " + shot15 + " | " + shot16 + " | " + shot17 + " | " + shot10 + " | " + shot3 + " | " + shot4);
+        // VILLAGE EXPANSION (DESIGN §9), shot 20: lane night — down the
+        // north lane (Lane B) at night, the new houses + lamp posts in
+        // frame. The cycle is already at night here.
+        Behaviour follow20 = cam.GetComponent("CameraFollow") as Behaviour;
+        if (follow20 != null) follow20.enabled = false;
+        cam.transform.position = new Vector3(0f, 2f, 14f);
+        cam.transform.LookAt(new Vector3(2.5f, 1.5f, 1.5f));
+        yield return null;
+        string shot20 = RenderScreenshot(cam, "lane-night.png", 1280, 720);
+        cam.transform.position = savedPos;
+        cam.transform.rotation = savedRot;
+        if (follow20 != null) follow20.enabled = true;
+        Assert.IsNotNull(shot20, "Screenshot 20 (lane night) failed to render");
+        Assert.IsTrue(File.Exists(shot20), "Screenshot 20 file missing: " + shot20);
+
+        Debug.Log("[Test] Screenshots: " + shot1 + " | " + shot2 + " | " + shot5 + " | " + shot6 + " | " + shot7 + " | " + shot8 + " | " + shot9 + " | " + shot13 + " | " + shot11 + " | " + shot12 + " | " + shot15 + " | " + shot16 + " | " + shot17 + " | " + shot19 + " | " + shot21 + " | " + shot10 + " | " + shot3 + " | " + shot4 + " | " + shot20);
         yield return null;
     }
 

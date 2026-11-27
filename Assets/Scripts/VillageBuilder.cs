@@ -317,6 +317,20 @@ public class VillageBuilder : MonoBehaviour
     private GameObject mobileCanvas;
     private int buildErrors;
 
+    // VILLAGE EXPANSION (DESIGN.md §5/§7) — load-once-and-clone cache, the
+    // expansion's layout list, its collider-registration record, and the
+    // new materials it creates (for the §8.1 count). The cached holders
+    // are the live scene objects (e.g. the cached E holder IS House_5 at
+    // 5.5 m; E at 4.0 m is a second keyed entry, file@4.0 — see §5.3).
+    private readonly Dictionary<string, GameObject> _modelCache =
+        new Dictionary<string, GameObject>();
+    private readonly List<VillageLayoutData.ExpansionEntry> _expansionLayout =
+        new List<VillageLayoutData.ExpansionEntry>();
+    private readonly HashSet<string> _expansionColliderNames = new HashSet<string>();
+    private readonly List<string> _expansionNewMaterials = new List<string>();
+    private Material _pondWaterMat;
+    private Material _awningClothMat;
+
     // Phase 3: real .glb models load async via glTFast. The CI test waits
     // for this flag (signalled by a "ModelsLoaded" GameObject — the test
     // assembly cannot reference game classes) before asserting/screenshots.
@@ -568,11 +582,23 @@ public class VillageBuilder : MonoBehaviour
             if (buildFinished) yield break;
             yield return SafeStep("NewModels", BuildNewModelsAsync());
             if (buildFinished) yield break;
+            // VILLAGE EXPANSION (DESIGN.md §10.1): after NewModels (every
+            // clone source — houses, handpump, lantern, animals, basket /
+            // matka — is loaded by then), before WarmLights (its objects
+            // must exist before CleanupStrays runs). A failure here skips
+            // the rest of the expansion only, never the village.
+            yield return SafeStep("Expansion", BuildExpansionAsync());
+            if (buildFinished) yield break;
             RunStep("WarmLights", BuildWarmLights);
             if (buildFinished) yield break;
             RunStep("CleanupStrays", CleanupStrays);
             if (buildFinished) yield break;
             RunStep("Moon", BuildMoon);
+            // Validation (DESIGN.md §7): after Moon, before the finally
+            // that calls FinishBuild — so a validation failure can never
+            // block the game from starting. It logs and fixes floating /
+            // sunk only; FinishBuild still runs.
+            RunStep("ValidateVillage", ValidateVillage);
         }
         finally
         {
@@ -1304,6 +1330,42 @@ public class VillageBuilder : MonoBehaviour
         return go;
     }
 
+    // VILLAGE EXPANSION (DESIGN.md §8.1/§8.2): shared-material primitives.
+    // Box()/Cylinder() assign renderer.material (a per-primitive fork —
+    // Audit A), so the expansion never uses them: these build the same
+    // primitive but assign sharedMaterial (no fork, instancing intact),
+    // destroy the dead Unity physics collider (movement uses
+    // VillageColliders, never Physics), and mark the object static for
+    // static batching. Batchable primitives ONLY — never call these for
+    // anything under House_Player (Round 11 ceiling fix) or for houses.
+    private GameObject BoxShared(string name, Vector3 pos, Vector3 size, Material mat, Transform parent)
+    {
+        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        go.name = name;
+        go.transform.SetParent(parent != null ? parent : villageRoot, false);
+        go.transform.position = pos;
+        go.transform.localScale = size;
+        Renderer r = go.GetComponent<Renderer>();
+        if (r != null && mat != null) r.sharedMaterial = mat;
+        Object.Destroy(go.GetComponent<Collider>());
+        go.isStatic = true;
+        return go;
+    }
+
+    private GameObject CylinderShared(string name, Vector3 pos, Vector3 scale, Material mat, Transform parent)
+    {
+        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        go.name = name;
+        go.transform.SetParent(parent != null ? parent : villageRoot, false);
+        go.transform.position = pos;
+        go.transform.localScale = scale;
+        Renderer r = go.GetComponent<Renderer>();
+        if (r != null && mat != null) r.sharedMaterial = mat;
+        Object.Destroy(go.GetComponent<Collider>());
+        go.isStatic = true;
+        return go;
+    }
+
     // OVERNIGHT R1: flat ground disc — a flattened cylinder (~20 sides).
     // Replaces Box for ground patches / lanes / grass: a box has 4 hard
     // straight edges and reads as a raised rectangular tile from above
@@ -1615,6 +1677,16 @@ public class VillageBuilder : MonoBehaviour
         // EW lane: |z - 7| <= 1.3 m full, feathered to 2.2 m; x -10..10.
         StampWetLane(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, mud, true);
         StampWetLane(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, mud, false);
+        // VILLAGE EXPANSION (DESIGN.md §2.2): lanes B/C/D as polylines
+        // (same 1.3/2.2 m wet-mud profile). Lane A is the NS lane above,
+        // extended to the gate (z1 20.9 in StampWetLane) — it is NOT
+        // re-stamped here as a polyline (double-stamping would darken it).
+        // Lane B2 is stamped ONLY if House_13 builds (same gate as the house).
+        StampWetLanePolyline(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, mud, VillageLayoutData.LaneB);
+        StampWetLanePolyline(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, mud, VillageLayoutData.LaneC);
+        StampWetLanePolyline(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, mud, VillageLayoutData.LaneD);
+        if (VillageLayoutData.House13Builds)
+            StampWetLanePolyline(px, S, minX, sizeX, minZ, sizeZ, Tiling, tileU, mud, VillageLayoutData.LaneB2);
         // (3) Cobbled chowk — cobble photo, stones ~0.5 m (sampled at
         // 1.5 m/tile like the old 6x chowk material), full inside r 3.6 m,
         // feathered to r 4.5 m. Painted AFTER the lanes, so paving wins
@@ -1671,7 +1743,12 @@ public class VillageBuilder : MonoBehaviour
         float x0 = northSouth ? -2.2f : -10.9f;
         float x1 = northSouth ? 2.2f : 10.9f;
         float z0 = northSouth ? -12.9f : 4.8f;
-        float z1 = northSouth ? 12.9f : 9.2f;
+        // VILLAGE EXPANSION (DESIGN.md §2.2): Lane A extends the NS lane to
+        // the gate (z 20.5). The south end still fades at -12..-12.9, so
+        // the fade is asymmetric now (see maskZ below) — a symmetric
+        // extension would have painted a lane south through the temple
+        // courtyard to z -20.9.
+        float z1 = northSouth ? 20.9f : 9.2f;
         int px0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(x0, minX, sizeX, tiling, tileU, s)));
         int px1 = Mathf.Min(s - 1, Mathf.CeilToInt(WorldToCanvas(x1, minX, sizeX, tiling, tileU, s)));
         int py0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(z0, minZ, sizeZ, tiling, tileU, s)));
@@ -1680,7 +1757,7 @@ public class VillageBuilder : MonoBehaviour
         {
             float wz = CanvasToWorld(py + 0.5f, minZ, sizeZ, tiling, tileU, s);
             float maskZ = northSouth
-                ? 1f - Smooth01(12f, 12.9f, Mathf.Abs(wz))
+                ? (wz >= 0f ? 1f - Smooth01(20f, 20.9f, wz) : 1f - Smooth01(12f, 12.9f, -wz))
                 : 1f - Smooth01(1.3f, 2.2f, Mathf.Abs(wz - 7f));
             if (maskZ <= 0f) continue;
             for (int pxx = px0; pxx <= px1; pxx++)
@@ -1699,6 +1776,72 @@ public class VillageBuilder : MonoBehaviour
                 int idx = py * s + pxx;
                 px[idx] = Color.Lerp(px[idx], wet, mask * 0.85f);
             }
+        }
+    }
+
+    // VILLAGE EXPANSION (DESIGN.md §2.2): one wet-lane band along an
+    // arbitrary polyline (Lanes B/C/D, +B2). Same profile as StampWetLane
+    // (1.3 m full / 2.2 m feather, 0.68/0.63/0.58 wet-mud tint, 0.85
+    // blend), sampled per pixel by distance to the polyline, with a
+    // 0.9 m fade at both ends so no lane ends blunt. Build-time only.
+    private void StampWetLanePolyline(Color[] px, int s, float minX, float sizeX, float minZ, float sizeZ,
+        float tiling, float tileU, Texture2D mud, Vector3[] waypoints)
+    {
+        if (waypoints == null || waypoints.Length < 2 || mud == null) return;
+        float minWx = float.MaxValue, maxWx = float.MinValue;
+        float minWz = float.MaxValue, maxWz = float.MinValue;
+        float total = 0f;
+        for (int i = 0; i < waypoints.Length; i++)
+        {
+            minWx = Mathf.Min(minWx, waypoints[i].x); maxWx = Mathf.Max(maxWx, waypoints[i].x);
+            minWz = Mathf.Min(minWz, waypoints[i].z); maxWz = Mathf.Max(maxWz, waypoints[i].z);
+            if (i + 1 < waypoints.Length)
+                total += Vector2.Distance(new Vector2(waypoints[i].x, waypoints[i].z),
+                    new Vector2(waypoints[i + 1].x, waypoints[i + 1].z));
+        }
+        const float pad = 2.5f;
+        int px0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(minWx - pad, minX, sizeX, tiling, tileU, s)));
+        int px1 = Mathf.Min(s - 1, Mathf.CeilToInt(WorldToCanvas(maxWx + pad, minX, sizeX, tiling, tileU, s)));
+        int py0 = Mathf.Max(0, Mathf.FloorToInt(WorldToCanvas(minWz - pad, minZ, sizeZ, tiling, tileU, s)));
+        int py1 = Mathf.Min(s - 1, Mathf.CeilToInt(WorldToCanvas(maxWz + pad, minZ, sizeZ, tiling, tileU, s)));
+        for (int py = py0; py <= py1; py++)
+        {
+            float wz = CanvasToWorld(py + 0.5f, minZ, sizeZ, tiling, tileU, s);
+            for (int pxx = px0; pxx <= px1; pxx++)
+            {
+                float wx = CanvasToWorld(pxx + 0.5f, minX, sizeX, tiling, tileU, s);
+                float dist, along;
+                DistToPolyline(wx, wz, waypoints, out dist, out along);
+                if (dist >= 2.2f) continue;
+                float mask = 1f - Smooth01(1.3f, 2.2f, dist);
+                mask *= Smooth01(0f, 0.9f, Mathf.Min(along, total - along));
+                if (mask <= 0f) continue;
+                Color wet = SampleWrapped(mud, (pxx + 0.5f) / s * 16f + 0.37f, (py + 0.5f) / s * 16f + 0.61f);
+                wet = new Color(wet.r * 0.68f, wet.g * 0.63f, wet.b * 0.58f, 1f);
+                int idx = py * s + pxx;
+                px[idx] = Color.Lerp(px[idx], wet, mask * 0.85f);
+            }
+        }
+    }
+
+    // Distance from a 2D point to a polyline + along-track distance of the
+    // closest point (for the end fades in StampWetLanePolyline).
+    private static void DistToPolyline(float px, float pz, Vector3[] pts, out float dist, out float along)
+    {
+        dist = float.MaxValue;
+        along = 0f;
+        float acc = 0f;
+        for (int i = 0; i + 1 < pts.Length; i++)
+        {
+            float ax = pts[i].x, az = pts[i].z, bx = pts[i + 1].x, bz = pts[i + 1].z;
+            float vx = bx - ax, vz = bz - az;
+            float len2 = vx * vx + vz * vz;
+            float len = Mathf.Sqrt(len2);
+            float t = len2 <= 0f ? 0f : Mathf.Clamp01(((px - ax) * vx + (pz - az) * vz) / len2);
+            float cx = ax + t * vx, cz = az + t * vz;
+            float d = Mathf.Sqrt((px - cx) * (px - cx) + (pz - cz) * (pz - cz));
+            if (d < dist) { dist = d; along = acc + t * len; }
+            acc += len;
         }
     }
 
@@ -2323,11 +2466,10 @@ public class VillageBuilder : MonoBehaviour
         System.Action<GameObject> onLoaded = null)
     {
         GameObject h = null;
-        yield return GltfModelLoader.LoadModel(
+        yield return LoadModelCached(
             file, villageRoot, name, pos, yaw, size,
             GltfModelLoader.NormalizeMode.ByHeight,
-            GltfModelLoader.ColliderMode.FullBounds, g => h = g);
-        if (h != null && onLoaded != null) onLoaded(h);
+            GltfModelLoader.ColliderMode.FullBounds, g => h = g, onLoaded);
         if (h == null)
         {
             // Primitive fallback with the same footprint.
@@ -3206,9 +3348,9 @@ public class VillageBuilder : MonoBehaviour
         System.Action<GameObject> onLoaded = null)
     {
         GameObject p = null;
-        yield return GltfModelLoader.LoadModel(
+        yield return LoadModelCached(
             file, villageRoot, goName, pos, yaw, size, normMode, colMode,
-            g => { p = g; if (g != null && onLoaded != null) onLoaded(g); });
+            g => p = g, onLoaded);
         if (p == null)
         {
             Debug.LogWarning("[Village] Prop skipped (load failed): " + file);
@@ -4501,6 +4643,831 @@ public class VillageBuilder : MonoBehaviour
         moonGO = moon;
         moon.SetActive(false);
         moonGlow = MakeGlowQuad("MoonGlow", new Vector3(-24f, 28f, -36f), 34f, new Color(0.7f, 0.75f, 0.95f, 0.55f));
+    }
+
+    // ------------------------------------------------------------------
+    // VILLAGE EXPANSION (DESIGN.md §5/§6/§7/§10.1)
+    // ------------------------------------------------------------------
+    // Load-once-and-clone: GltfModelLoader.LoadModel has NO cache (Audit
+    // A), so every expansion object is either a fresh load at a NEW
+    // height (exactly one: E at 4.0 m — see BuildExpansionHouses) or an
+    // Instantiate clone of an already-loaded live object. Never a
+    // primitive-house fallback: a missing source leaves its slot empty
+    // and logs a warning for the validator to report.
+
+    private static string CacheKey(string file, float size)
+    {
+        return file + "@" + size.ToString("F2");
+    }
+
+    // The only new loading entry point. Cache-hit: clone the cached holder
+    // (no re-parse), run fixup on the CLONE, report it. Cache-miss: one
+    // LoadModel, fixup on the fresh holder, then cache it. Existing steps
+    // were migrated to this (BuildRealHouse, LoadProp) so the cache is warm
+    // before the expansion step runs; the miss path is behaviour-identical
+    // to the old direct LoadModel call. NOTE: no 5 cm sink here — the sink
+    // applies to EXPANSION objects only (CloneModel / House_7). Sinking
+    // the migrated existing loads would drop the player house 5 cm and
+    // eat half the door-lintel clearance (1.85 m opening, Nilesh clears
+    // by ~10 cm).
+    private System.Collections.IEnumerator LoadModelCached(
+        string file, Transform parent, string goName, Vector3 pos, float yaw, float size,
+        GltfModelLoader.NormalizeMode normMode, GltfModelLoader.ColliderMode colMode,
+        System.Action<GameObject> onLoaded, System.Action<GameObject> fixup)
+    {
+        string key = CacheKey(file, size);
+        GameObject cached;
+        if (_modelCache.TryGetValue(key, out cached) && cached != null)
+        {
+            Bounds cb;
+            float cMinY;
+            // A cache-hit clone gets the same collider the loader would
+            // have registered for a fresh load (FullBounds only); the
+            // hit path never triggers in the current flow (no duplicate
+            // file@size load exists), but the behaviour must match if it
+            // ever does.
+            bool registerCollider = colMode == GltfModelLoader.ColliderMode.FullBounds;
+            GameObject clone = CloneModel(cached, goName, pos, yaw, registerCollider, true, out cb, out cMinY);
+            if (clone != null && fixup != null) fixup(clone);
+            if (onLoaded != null) onLoaded(clone);
+            yield break;
+        }
+        GameObject loaded = null;
+        yield return GltfModelLoader.LoadModel(
+            file, parent, goName, pos, yaw, size, normMode, colMode, g => loaded = g);
+        if (loaded != null)
+        {
+            if (fixup != null) fixup(loaded);
+            _modelCache[key] = loaded;
+        }
+        if (onLoaded != null) onLoaded(loaded);
+    }
+
+    // Shift an object so its rendered bounds sit at targetMinY (DESIGN §6).
+    private static void SinkToGround(GameObject go, float targetMinY)
+    {
+        if (go == null) return;
+        Bounds b = GetWorldBounds(go);
+        float shift = b.min.y - targetMinY;
+        if (Mathf.Abs(shift) > 0.001f) go.transform.position -= Vector3.up * shift;
+    }
+
+    // CloneModel (DESIGN §5.3): Instantiate from a cached source, rename,
+    // place, yaw. The source was already normalised to its target height,
+    // so a clone at the SAME height needs no rescale; a different height
+    // is a second cache entry, never a rescaled clone. Sinks to
+    // bounds.min.y = -0.05 when sinkToGround (DESIGN §6). Registers a
+    // FullBounds-equivalent block itself when registerCollider (the
+    // loader's FullBounds path is NOT available to a clone). Strips the
+    // behaviours that must not duplicate: a copied AnimalRoam would roam
+    // from the SOURCE's home, a copied Light would add a real-time light.
+    // Never static-batches a clone (DESIGN §8.2: new houses stay individual).
+    private GameObject CloneModel(GameObject source, string goName, Vector3 pos, float yaw,
+        bool registerCollider, bool sinkToGround, out Bounds bounds, out float expMinY)
+    {
+        bounds = new Bounds(pos, Vector3.zero);
+        expMinY = 0f;
+        if (source == null)
+        {
+            Debug.LogWarning("[Village] CloneModel skipped, null source: " + goName);
+            return null;
+        }
+        GameObject c = Object.Instantiate(source, villageRoot);
+        c.name = goName;
+        c.transform.position = pos;
+        c.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+        c.isStatic = false;
+        foreach (AnimalRoam a in c.GetComponents<AnimalRoam>()) Object.Destroy(a);
+        foreach (NpcRoutine n in c.GetComponents<NpcRoutine>()) Object.Destroy(n);
+        foreach (Light l in c.GetComponentsInChildren<Light>()) Object.Destroy(l);
+        c.SetActive(true);
+        if (sinkToGround) SinkToGround(c, -0.05f);
+        bounds = GetWorldBounds(c);
+        expMinY = sinkToGround ? -0.05f : bounds.min.y;
+        if (registerCollider) RegisterExpansionBlock(goName, bounds);
+        return c;
+    }
+
+    // Per-clone wear tint (DESIGN §1.4): clone each distinct shared
+    // material named matName ONCE per clone and multiply its base colour —
+    // the source's shared materials are untouched, and only ONE extra
+    // material instance is created per call (see the §8.1 count note in
+    // the build report). Never renderer.material (that forks per renderer).
+    private void TintCloneMaterial(GameObject clone, string matName, Color mult)
+    {
+        if (clone == null) return;
+        Dictionary<Material, Material> map = new Dictionary<Material, Material>();
+        foreach (Renderer r in clone.GetComponentsInChildren<Renderer>())
+        {
+            Material[] shared = r.sharedMaterials;
+            bool changed = false;
+            for (int i = 0; i < shared.Length; i++)
+            {
+                Material m = shared[i];
+                if (m == null || m.name != matName) continue;
+                Material tinted;
+                if (!map.TryGetValue(m, out tinted))
+                {
+                    tinted = new Material(m);
+                    tinted.name = m.name + "_ExpansionTint";
+                    if (tinted.HasProperty("_BaseColor"))
+                    {
+                        Color b = tinted.GetColor("_BaseColor");
+                        tinted.SetColor("_BaseColor", new Color(b.r * mult.r, b.g * mult.g, b.b * mult.b, b.a));
+                    }
+                    map[m] = tinted;
+                    _expansionNewMaterials.Add(tinted.name);
+                }
+                shared[i] = tinted;
+                changed = true;
+            }
+            if (changed) r.sharedMaterials = shared;
+        }
+    }
+
+    private void RegisterExpansionBlock(string name, Bounds b)
+    {
+        VillageColliders.Register(b);
+        _expansionColliderNames.Add(name);
+    }
+
+    private void NoteExpansionEntry(string name, Bounds b, float expMinY, bool needsCollider,
+        string kind, float expW, float expD, float expH, float yaw, string file)
+    {
+        _expansionLayout.Add(new VillageLayoutData.ExpansionEntry
+        {
+            name = name,
+            file = file,
+            kind = kind,
+            bounds = b,
+            yaw = yaw,
+            expW = expW,
+            expD = expD,
+            expH = expH,
+            expMinY = expMinY,
+            needsCollider = needsCollider,
+        });
+    }
+
+    // Belt-and-braces warm-up: any expansion source the migrated helpers
+    // did not cache (e.g. a step that still calls LoadModel directly) is
+    // resolved from the live scene by name. A source that is neither cached
+    // nor found leaves its clones skipped with a warning.
+    private void WarmExpansionCache()
+    {
+        string[,] sources = new string[,]
+        {
+            { VillageLayoutData.FileHouseE, "5.5", "House_5" },
+            { VillageLayoutData.FileHouseC, "3.5", "House_3" },
+            { VillageLayoutData.FileHouseD, "3.5", "House_4" },
+            { VillageLayoutData.FileHandpump, "1.3", "Handpump" },
+            { VillageLayoutData.FileLantern, "0.9", "ChowkLantern" },
+            { VillageLayoutData.FileCow, "1.45", "Cow" },
+            { VillageLayoutData.FileGoat, "0.7", "Goat" },
+            { VillageLayoutData.FileBasket, "0.7", "Basket" },
+            { VillageLayoutData.FileMatka, "0.5", "Matka" },
+        };
+        for (int i = 0; i < sources.GetLength(0); i++)
+        {
+            string file = sources[i, 0];
+            float size;
+            if (!float.TryParse(sources[i, 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out size)) continue;
+            string key = CacheKey(file, size);
+            GameObject cached;
+            if (_modelCache.TryGetValue(key, out cached) && cached != null) continue;
+            GameObject found = GameObject.Find(sources[i, 2]);
+            if (found != null)
+            {
+                _modelCache[key] = found;
+                Debug.Log("[Village] Expansion cache warmed from scene: " + file + " @" + size.ToString("F1") + " (" + sources[i, 2] + ")");
+            }
+            else
+            {
+                Debug.LogWarning("[Village] Expansion source not loaded, its clones will be skipped: " + file + " (expected " + sources[i, 2] + ")");
+            }
+        }
+    }
+
+    private bool TryGetSource(string file, float size, out GameObject src)
+    {
+        if (_modelCache.TryGetValue(CacheKey(file, size), out src) && src != null) return true;
+        src = null;
+        Debug.LogWarning("[Village] Expansion source missing (not loaded, clones skipped): " + file + " @" + size.ToString("F1"));
+        return false;
+    }
+
+    // DESIGN.md §10.1: after NewModels, before WarmLights. Houses first
+    // (Table A, then Table B if its gate is met), then landmarks in §3
+    // order. Lanes are NOT built here — they are baked into the ground
+    // macro texture (§2.2); this step only logs the polylines it serves.
+    private System.Collections.IEnumerator BuildExpansionAsync()
+    {
+        WarmExpansionCache();
+        yield return BuildExpansionHouses();
+        if (buildFinished) yield break;
+        RunStep("ExpansionHandpumps", BuildExpansionHandpumps);
+        if (buildFinished) yield break;
+        RunStep("ExpansionChabutra", BuildExpansionChabutra);
+        if (buildFinished) yield break;
+        RunStep("ExpansionKirana", BuildExpansionKirana);
+        if (buildFinished) yield break;
+        RunStep("ExpansionPond", BuildExpansionPond);
+        if (buildFinished) yield break;
+        RunStep("ExpansionFields", BuildExpansionFields);
+        if (buildFinished) yield break;
+        RunStep("ExpansionCattleShed", BuildExpansionCattleShed);
+        if (buildFinished) yield break;
+        RunStep("ExpansionHaystacks", BuildExpansionHaystacks);
+        if (buildFinished) yield break;
+        RunStep("ExpansionCharpais", BuildExpansionCharpais);
+        if (buildFinished) yield break;
+        RunStep("ExpansionClotheslines", BuildExpansionClotheslines);
+        if (buildFinished) yield break;
+        RunStep("ExpansionLampPosts", BuildExpansionLampPosts);
+        int clones = 0, houses = 0;
+        foreach (VillageLayoutData.ExpansionEntry e in _expansionLayout)
+        {
+            if (e.kind == "house") houses++;
+            if (e.file != "") clones++;
+        }
+        Debug.Log("[Village] Expansion done: " + houses + " new houses, " + _expansionLayout.Count
+            + " layout entries, lanes A/B/C/D"
+            + (VillageLayoutData.House13Builds ? "+B2" : " (B2 omitted — House_13 skipped)")
+            + " stamped in the ground macro texture; panchayat OPTIONAL/deferred (DESIGN §3)");
+    }
+
+    // Houses (SALVAGED TABLE — jointly SAT-verified 2026-11-27, true GLB
+    // footprints; DESIGN Table A is superseded: 4 of its 6 houses FAIL
+    // against the true footprints). 5 houses: House_7, House_8, House_9,
+    // House_10, House_12. House_11 DROPPED (Wolf/Chicken roam discs
+    // intrude 1.75 m / 1.54 m and AnimalRoam.PickTarget() never rejects
+    // inside-house targets); House_13 DROPPED (haveli 7.04 m > 6.0 m).
+    private System.Collections.IEnumerator BuildExpansionHouses()
+    {
+        // House_7 — E at 4.0 m. The source House_5 is 5.5 m, and §5.3
+        // forbids rescaling a clone (it would shrink the footprint to
+        // 4.2 x 3.2 against the SAT-verified 6.57 x 4.22), so this is the
+        // ONE fresh load of the round, cached as file@4.0 (the §5.3
+        // keyed second-height entry). House_8 + House_12 clone from it.
+        // DESIGN §5.4's "0 new unique loads / 18 clones" cannot hold as
+        // written for E (its table rows sum to 20, not 18); this round is
+        // 1 fresh load + 17 clones = 18 expansion GLB objects (see the
+        // build report for the full count).
+        GameObject house7 = null;
+        yield return LoadModelCached(VillageLayoutData.FileHouseE, villageRoot, "House_7",
+            new Vector3(-17.25f, 0f, 7.75f), 0f, 4.0f,
+            GltfModelLoader.NormalizeMode.ByHeight, GltfModelLoader.ColliderMode.None,
+            g => house7 = g, g => WeatherHutPlaster(g));
+        if (house7 != null)
+        {
+            SinkToGround(house7, -0.05f);
+            Bounds b7 = GetWorldBounds(house7);
+            RegisterExpansionBlock("House_7", b7);
+            NoteExpansionEntry("House_7", b7, -0.05f, true, "house", 6.57f, 4.22f, 4.0f, 0f, VillageLayoutData.FileHouseE);
+        }
+        else
+        {
+            Debug.LogWarning("[Village] Expansion: House_7 failed to load — slot left empty (no primitive fallback)");
+        }
+
+        // House_8 — clone of House_7 (same E@4.0 holder), yaw 90, soot-darkened walls.
+        // MOVED south z 2.5 -> 1.5 (salvaged table; min margins ring 0.64, Clinic 1.27).
+        GameObject e40;
+        if (TryGetSource(VillageLayoutData.FileHouseE, 4.0f, out e40))
+        {
+            Bounds b;
+            float minY;
+            GameObject h8 = CloneModel(e40, "House_8", new Vector3(-18.25f, 0f, 1.5f), 90f, true, true, out b, out minY);
+            if (h8 != null)
+            {
+                TintCloneMaterial(h8, "Material.002", new Color(0.75f, 0.72f, 0.70f));
+                NoteExpansionEntry("House_8", b, minY, true, "house", 6.57f, 4.22f, 4.0f, 90f, VillageLayoutData.FileHouseE);
+            }
+        }
+
+        // House_9 + House_10 — D clones from House_4 (3.5 m, same height).
+        // House_9 MOVED south z 0.1 -> -0.55 (salvaged table; valid window
+        // [-0.57,-0.55], -0.54 FAILS; binding margin only 0.06 m to the
+        // player WALL box — the live validator re-confirms it in V4).
+        GameObject d35;
+        if (TryGetSource(VillageLayoutData.FileHouseD, 3.5f, out d35))
+        {
+            Bounds b;
+            float minY;
+            GameObject h9 = CloneModel(d35, "House_9", new Vector3(-8.5f, 0f, -0.55f), 0f, true, true, out b, out minY);
+            if (h9 != null) NoteExpansionEntry("House_9", b, minY, true, "house", 5.5f, 5.5f, 3.5f, 0f, VillageLayoutData.FileHouseD);
+            GameObject h10 = CloneModel(d35, "House_10", new Vector3(-7.75f, 0f, -17.0f), 0f, true, true, out b, out minY);
+            if (h10 != null) NoteExpansionEntry("House_10", b, minY, true, "house", 5.5f, 5.5f, 3.5f, 0f, VillageLayoutData.FileHouseD);
+            Debug.Log("[Village] Expansion: House_10 moss-thatch wear NOT applied — the D-model thatch material name is unverified (forking blind could tint the walls); see build report");
+        }
+
+        // House_11 DROPPED (salvaged table): the D-at-(-4.5,13.0) swap
+        // passes hard constraints, but the Wolf (-6,8) r4 and Chicken
+        // (-8.5,9.5) r3 roam discs intrude 1.75 m / 1.54 m into the
+        // footprint, and AnimalRoam.PickTarget() picks a random point in
+        // the disc with NO validity check — a target inside the house
+        // makes the animal press against the wall for up to 1.5 s, give
+        // up, pause 2-4 s, and repeat. No House_11 object is built.
+
+        // House_12 — E clone from the E@4.0 holder (MODEL SWAP C->E),
+        // yaw -90. The E model's front face is Unity -Z (the only face
+        // with door openings — see the build report's door-face analysis),
+        // so yaw -90 puts the front EAST onto Lane B. Footprint
+        // SAT-identical to yaw 90 (6.57 x 4.22 world 4.22 x 6.57).
+        if (TryGetSource(VillageLayoutData.FileHouseE, 4.0f, out e40))
+        {
+            Bounds b;
+            float minY;
+            GameObject h12 = CloneModel(e40, "House_12", new Vector3(3.1f, 0f, -4.0f), -90f, true, true, out b, out minY);
+            if (h12 != null) NoteExpansionEntry("House_12", b, minY, true, "house", 6.57f, 4.22f, 4.0f, -90f, VillageLayoutData.FileHouseE);
+        }
+
+        // House_13 — DROPPED, permanently gated OFF (DESIGN Table B).
+        // The haveli's MEASURED N-S extent is 7.04 m (> 6.0 m), so
+        // House13Builds is false and this block never runs. At
+        // (16.05, 2.0) House_13 would penetrate the haveli by 0.13 m;
+        // alternative pocket spots also fail. Do NOT nudge it west or
+        // south to force it in, and do NOT flip the gate constant.
+        if (VillageLayoutData.House13Builds)
+        {
+            if (TryGetSource(VillageLayoutData.FileHouseE, 4.0f, out e40))
+            {
+                Bounds b;
+                float minY;
+                GameObject h13 = CloneModel(e40, "House_13", new Vector3(16.05f, 0f, 2.0f), 0f, true, true, out b, out minY);
+                if (h13 != null) NoteExpansionEntry("House_13", b, minY, true, "house", 6.57f, 4.22f, 4.0f, 0f, VillageLayoutData.FileHouseE);
+            }
+        }
+        else
+        {
+            Debug.Log("[Village] Expansion: House_13 SKIPPED — haveli N-S extent gate (HaveliTrueNSExtentM="
+                + VillageLayoutData.HaveliTrueNSExtentM.ToString("0.00") + " m measured > 6.0; House_13 DROPPED, see VillageLayoutData)");
+        }
+        Debug.Log("[Village] Expansion: panchayat building OPTIONAL/deferred — no free 6 m slot inside |20| (DESIGN §3); not built.");
+    }
+
+    private void BuildExpansionHandpumps()
+    {
+        GameObject src;
+        if (!TryGetSource(VillageLayoutData.FileHandpump, 1.3f, out src)) return;
+        Bounds b;
+        float minY;
+        GameObject hp2 = CloneModel(src, "Handpump_2", new Vector3(-1f, 0f, 18f), 0f, true, true, out b, out minY);
+        if (hp2 != null) NoteExpansionEntry("Handpump_2", b, minY, true, "prop", 0.8f, 0.8f, 1.3f, 0f, VillageLayoutData.FileHandpump);
+        GameObject hp3 = CloneModel(src, "Handpump_3", new Vector3(10.5f, 0f, -3f), 30f, true, true, out b, out minY);
+        if (hp3 != null) NoteExpansionEntry("Handpump_3", b, minY, true, "prop", 0.8f, 0.8f, 1.3f, 30f, VillageLayoutData.FileHandpump);
+    }
+
+    private void BuildExpansionChabutra()
+    {
+        GameObject box = BoxShared("Chabutra", new Vector3(19f, 0.2f, 5f), new Vector3(3.0f, 0.4f, 3.0f), matStone, villageRoot);
+        // Trunk-through-platform exception (DESIGN §3): the banyan trunk
+        // passes through the platform by design; the trunk's Trunk block
+        // stays, and the platform top is a walkable (0.40 m < StepUp 0.45).
+        // No Block for the platform itself — it is walked on, not into.
+        VillageColliders.RegisterWalkable(19f, 5f, 1.5f, 0.40f);
+        Bounds b = GetWorldBounds(box);
+        NoteExpansionEntry("Chabutra", b, 0f, false, "landmark", 3.0f, 3.0f, 0.4f, 0f, "");
+    }
+
+    private void BuildExpansionKirana()
+    {
+        // House_12 IS the kirana shop (DESIGN §3): counter across its EAST
+        // front (faces Lane B), striped awning above it, baskets + matka
+        // on the counter, one hanging lantern. No new GLB, no new door.
+        // RE-FIT 2026-11-27 (salvaged table): House_12 is now the E model
+        // at yaw -90, whose front face (Unity -Z, the only face with door
+        // openings) faces EAST — the east wall is at x 5.21, so the shop
+        // sits at x 5.45-6.2. The OLD C-model counter at x 6.65 overlapped
+        // House_4 by 0.6 x 0.65 m (earlier audit missed it); this re-fit
+        // fixes that (counter vs House_4 gap 0.20 m). The awning is
+        // narrowed to 1.0 m and centred at x 5.65 so its plan footprint
+        // clears House_4's true west edge (x 6.25) — the rotated panels
+        // span x ~5.18-6.12. The matka moved to z -3.9 so it clears
+        // House_4's north edge (z -4.25) by 0.10 m.
+        GameObject counter = BoxShared("KiranaCounter", new Vector3(5.75f, 0.45f, -4f), new Vector3(0.6f, 0.9f, 1.8f), matWood, villageRoot);
+        Bounds cb = GetWorldBounds(counter);
+        RegisterExpansionBlock("KiranaCounter", cb);
+        NoteExpansionEntry("KiranaCounter", cb, 0f, true, "landmark", 0.6f, 1.8f, 0.9f, 0f, "");
+        if (_awningClothMat == null)
+        {
+            _awningClothMat = MakeFlat("KiranaAwningCloth", new Color(0.72f, 0.25f, 0.16f), 0.4f);
+            if (_awningClothMat != null)
+            {
+                _awningClothMat.enableInstancing = true;
+                _expansionNewMaterials.Add(_awningClothMat.name);
+            }
+        }
+        GameObject awnParent = new GameObject("KiranaAwning");
+        awnParent.transform.SetParent(villageRoot, false);
+        awnParent.transform.position = new Vector3(5.65f, 2.45f, -4f);
+        GameObject p1 = BoxShared("KiranaAwning_N", new Vector3(5.65f, 2.45f, -4.45f), new Vector3(1.0f, 0.05f, 1.0f), _awningClothMat, awnParent.transform);
+        p1.transform.rotation = Quaternion.Euler(0f, 0f, -20f);
+        GameObject p2 = BoxShared("KiranaAwning_S", new Vector3(5.65f, 2.45f, -3.55f), new Vector3(1.0f, 0.05f, 1.0f), _awningClothMat, awnParent.transform);
+        p2.transform.rotation = Quaternion.Euler(0f, 0f, -20f);
+        Bounds ab = GetWorldBounds(awnParent);
+        NoteExpansionEntry("KiranaAwning", ab, ab.min.y, false, "landmark", 1.0f, 2.0f, 0.05f, 0f, "");
+        GameObject basketSrc, matkaSrc, lanternSrc;
+        if (TryGetSource(VillageLayoutData.FileBasket, 0.7f, out basketSrc))
+        {
+            Bounds b;
+            float minY;
+            GameObject b1 = CloneModel(basketSrc, "KiranaBasket_1", new Vector3(5.75f, 0.9f, -4.7f), 0f, false, false, out b, out minY);
+            if (b1 != null) NoteExpansionEntry("KiranaBasket_1", b, minY, false, "prop", 0.7f, 0.7f, 0.7f, 0f, VillageLayoutData.FileBasket);
+            GameObject b2 = CloneModel(basketSrc, "KiranaBasket_2", new Vector3(5.75f, 0.9f, -3.3f), 0f, false, false, out b, out minY);
+            if (b2 != null) NoteExpansionEntry("KiranaBasket_2", b, minY, false, "prop", 0.7f, 0.7f, 0.7f, 0f, VillageLayoutData.FileBasket);
+        }
+        if (TryGetSource(VillageLayoutData.FileMatka, 0.5f, out matkaSrc))
+        {
+            Bounds b;
+            float minY;
+            GameObject m = CloneModel(matkaSrc, "KiranaMatka", new Vector3(5.9f, 0.9f, -3.9f), 0f, false, false, out b, out minY);
+            if (m != null) NoteExpansionEntry("KiranaMatka", b, minY, false, "prop", 0.5f, 0.5f, 0.5f, 0f, VillageLayoutData.FileMatka);
+        }
+        if (TryGetSource(VillageLayoutData.FileLantern, 0.9f, out lanternSrc))
+        {
+            Bounds b;
+            float minY;
+            // Hanging lantern in the gap between the two awning panels.
+            GameObject l = CloneModel(lanternSrc, "KiranaLantern", new Vector3(5.75f, 1.5f, -4f), 0f, false, false, out b, out minY);
+            if (l != null) NoteExpansionEntry("KiranaLantern", b, minY, false, "prop", 0.9f, 0.9f, 0.9f, 0f, VillageLayoutData.FileLantern);
+        }
+    }
+
+    // Pond water material (DESIGN §3/§8.1): URP Lit, transparent,
+    // blue-green tint, smoothness 0.9, NO new shader. Named
+    // "VillagePondWater" — never "WaterPuddle" (banned name).
+    private Material MakePondWaterMaterial()
+    {
+        Shader s = GetStandardShader();
+        if (s == null)
+        {
+            Debug.LogWarning("[Village] Standard shader not available for VillagePondWater");
+            return null;
+        }
+        Material m = new Material(s);
+        m.name = "VillagePondWater";
+        m.color = new Color(0.16f, 0.35f, 0.38f, 0.75f);
+        m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        m.SetInt("_ZWrite", 0);
+        m.DisableKeyword("_ALPHATEST_ON");
+        m.EnableKeyword("_ALPHABLEND_ON");
+        m.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        m.SetFloat("_Surface", 1f);
+        m.SetFloat("_Blend", 0f);
+        m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        m.renderQueue = 3000;
+        m.SetFloat("_Metallic", 0f);
+        m.SetFloat("_Glossiness", 0.9f);
+        m.SetFloat("_Smoothness", 0.9f);
+        m.SetFloat("_Cull", 0f); // double-sided: the flat plane must read from above
+        m.enableInstancing = true;
+        Texture2D ripple = Tex("brown_mud_dry_nor_gl_1k");
+        if (ripple != null)
+        {
+            m.SetTexture("_BumpMap", ripple);
+            m.SetFloat("_BumpScale", 0.3f);
+            m.EnableKeyword("_NORMALMAP");
+        }
+        return m;
+    }
+
+    private void BuildExpansionPond()
+    {
+        if (_pondWaterMat == null)
+        {
+            _pondWaterMat = MakePondWaterMaterial();
+            if (_pondWaterMat != null) _expansionNewMaterials.Add(_pondWaterMat.name);
+        }
+        // Water plane (BuildQuadMesh, front face up via +90 deg X rotation
+        // — the mesh's front face is -Z, and R_x(+90) maps -Z to +Y).
+        GameObject pond = new GameObject("VillagePond");
+        pond.transform.SetParent(villageRoot, false);
+        pond.transform.position = new Vector3(16.1f, 0.02f, 8.2f);
+        pond.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+        pond.transform.localScale = new Vector3(3.4f, 3.0f, 1f);
+        MeshFilter mf = pond.AddComponent<MeshFilter>();
+        mf.mesh = BuildQuadMesh();
+        MeshRenderer mr = pond.AddComponent<MeshRenderer>();
+        mr.sharedMaterial = _pondWaterMat;
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        Bounds pb = GetWorldBounds(pond);
+        // The player walks AROUND the pond, not through the water.
+        RegisterExpansionBlock("VillagePond", new Bounds(new Vector3(16.1f, 0.25f, 8.2f), new Vector3(3.4f, 0.5f, 3.0f)));
+        NoteExpansionEntry("VillagePond", pb, pb.min.y, true, "landmark", 3.4f, 3.0f, 0.02f, 0f, "");
+        // Mud-bund rim (matMudDry — NOT matGround: matGround now carries
+        // the baked GroundMacroMud texture at 7x7, which would sample the
+        // wrong patch on a 0.3 m box; matMudDry is the same mud PBR).
+        GameObject rimN = BoxShared("VillagePond_RimN", new Vector3(16.1f, 0.15f, 9.85f), new Vector3(4.0f, 0.3f, 0.3f), matMudDry, villageRoot);
+        NoteExpansionEntry("VillagePond_RimN", GetWorldBounds(rimN), 0f, false, "landmark", 4.0f, 0.3f, 0.3f, 0f, "");
+        GameObject rimS = BoxShared("VillagePond_RimS", new Vector3(16.1f, 0.15f, 6.55f), new Vector3(4.0f, 0.3f, 0.3f), matMudDry, villageRoot);
+        NoteExpansionEntry("VillagePond_RimS", GetWorldBounds(rimS), 0f, false, "landmark", 4.0f, 0.3f, 0.3f, 0f, "");
+        GameObject rimW = BoxShared("VillagePond_RimW", new Vector3(14.25f, 0.15f, 8.2f), new Vector3(0.3f, 0.3f, 3.0f), matMudDry, villageRoot);
+        NoteExpansionEntry("VillagePond_RimW", GetWorldBounds(rimW), 0f, false, "landmark", 0.3f, 3.0f, 0.3f, 0f, "");
+        GameObject rimE = BoxShared("VillagePond_RimE", new Vector3(17.95f, 0.15f, 8.2f), new Vector3(0.3f, 0.3f, 3.0f), matMudDry, villageRoot);
+        NoteExpansionEntry("VillagePond_RimE", GetWorldBounds(rimE), 0f, false, "landmark", 0.3f, 3.0f, 0.3f, 0f, "");
+    }
+
+    private void BuildExpansionFields()
+    {
+        // Field_2 MOVED (-12,-18) -> (-14.5,-19) and Field_3 MOVED
+        // (-12.5,19) -> (-2,16) (salvaged landmark positions, 2026-11-27;
+        // the old spots penetrated House_10 / CattleShed against the TRUE
+        // footprints). Field_3's east edge sits on Lane A's centreline —
+        // the lane stamp's west fade is covered by grass for z 14.75-17.25
+        // (visual seam, not a collision failure; see VillageLayoutData).
+        BuildCropField("Field_2", new Vector3(-14.5f, 0f, -19f), 5.0f, 3.0f, 3, 7);
+        BuildCropField("Field_3", new Vector3(-2f, 0f, 16f), 4.0f, 2.5f, 3, 6);
+    }
+
+    // One crop field: grass box + wheat cross-quads (same shared mesh /
+    // material as the existing field at (10,16) — no colliders on the
+    // plants) + mud-bund rim boxes (0.3 m high, stepped over, no Block).
+    private void BuildCropField(string name, Vector3 centre, float w, float d, int rows, int cols)
+    {
+        GameObject grass = BoxShared(name, centre + new Vector3(0f, 0.02f, 0f), new Vector3(w, 0.06f, d), matGrass, villageRoot);
+        BoxShared(name + "_BundN", centre + new Vector3(0f, 0.15f, d / 2f + 0.15f), new Vector3(w + 0.6f, 0.3f, 0.3f), matMudDry, villageRoot);
+        BoxShared(name + "_BundS", centre + new Vector3(0f, 0.15f, -d / 2f - 0.15f), new Vector3(w + 0.6f, 0.3f, 0.3f), matMudDry, villageRoot);
+        BoxShared(name + "_BundW", centre + new Vector3(-w / 2f - 0.15f, 0.15f, 0f), new Vector3(0.3f, 0.3f, d), matMudDry, villageRoot);
+        BoxShared(name + "_BundE", centre + new Vector3(w / 2f + 0.15f, 0.15f, 0f), new Vector3(0.3f, 0.3f, d), matMudDry, villageRoot);
+        if (cropPlantMat == null) cropPlantMat = MakeCropPlantMaterial();
+        if (cropPlantMesh == null) cropPlantMesh = BuildCropPlantMesh();
+        if (cropPlantMat != null && cropPlantMesh != null)
+        {
+            for (int r = 0; r < rows; r++)
+            {
+                for (int c = 0; c < cols; c++)
+                {
+                    float jx = ((r * 3 + c * 5) % 5 - 2) * 0.06f;
+                    float jz = ((r * 11 + c * 7) % 5 - 2) * 0.06f;
+                    float yaw = (r * 31 + c * 17) % 360;
+                    float s = 0.85f + ((r * 7 + c * 13) % 5) * 0.07f;
+                    float xStep = (w - 0.9f) / Mathf.Max(cols - 1, 1);
+                    float zStep = (d - 0.8f) / Mathf.Max(rows - 1, 1);
+                    Vector3 p = centre + new Vector3(-(w - 0.9f) / 2f + c * xStep + jx, 0.02f, -(d - 0.8f) / 2f + r * zStep + jz);
+                    GameObject plant = new GameObject(name + "_Plant_" + r + "_" + c);
+                    plant.transform.SetParent(villageRoot, false);
+                    plant.transform.position = p;
+                    plant.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+                    plant.transform.localScale = new Vector3(s, s, s);
+                    MeshFilter mf = plant.AddComponent<MeshFilter>();
+                    mf.sharedMesh = cropPlantMesh;
+                    MeshRenderer mr = plant.AddComponent<MeshRenderer>();
+                    mr.sharedMaterial = cropPlantMat;
+                }
+            }
+        }
+        if (grass != null) NoteExpansionEntry(name, GetWorldBounds(grass), 0f, false, "field", w, d, 0.06f, 0f, "");
+    }
+
+    private void BuildExpansionCattleShed()
+    {
+        // MOVED +0.5 in x (-14,18.75) -> (-13.5,18.75) (salvaged landmark
+        // positions, 2026-11-27; House_5 is 9.04 m wide, so the old spot
+        // left only 0.06 m to its north corner; the new spot leaves 0.24 m).
+        // Fence runs are relative to shedC so the fence follows the shed.
+        Vector3 shedC = new Vector3(-13.5f, 0f, 18.75f);
+        // Open hut: 4 posts + thatch roof plane, NO walls (animals walk
+        // in/out). Each post gets its own small Block; the roof has none.
+        Vector3[] postOffsets = new Vector3[]
+        {
+            new Vector3(-1.9f, 1.1f, 1.4f), new Vector3(1.9f, 1.1f, 1.4f),
+            new Vector3(-1.9f, 1.1f, -1.4f), new Vector3(1.9f, 1.1f, -1.4f),
+        };
+        string[] postNames = new string[] { "CattleShed_PostNW", "CattleShed_PostNE", "CattleShed_PostSW", "CattleShed_PostSE" };
+        for (int i = 0; i < 4; i++)
+        {
+            GameObject post = BoxShared(postNames[i], shedC + postOffsets[i], new Vector3(0.15f, 2.2f, 0.15f), matWood, villageRoot);
+            Bounds pb = GetWorldBounds(post);
+            RegisterExpansionBlock(postNames[i], new Bounds(pb.center, new Vector3(0.2f, 2.2f, 0.2f)));
+            NoteExpansionEntry(postNames[i], pb, 0f, true, "landmark", 0.2f, 0.2f, 2.2f, 0f, "");
+        }
+        GameObject roof = BoxShared("CattleShed_Roof", shedC + new Vector3(0f, 2.24f, 0f), new Vector3(4.0f, 0.08f, 3.0f), matThatch, villageRoot);
+        Bounds rb = GetWorldBounds(roof);
+        NoteExpansionEntry("CattleShed_Roof", rb, rb.min.y, false, "landmark", 4.0f, 3.0f, 0.08f, 0f, "");
+        // Low fence on the south + east sides, visual only (no Block —
+        // the gate gap is the entry; a Block would trap the animals).
+        // South side has a 1.2 m gate gap at its centre.
+        GameObject fence = new GameObject("CattleShed_Fence");
+        fence.transform.SetParent(villageRoot, false);
+        fence.transform.position = shedC;
+        BuildShedFenceRun(fence.transform, shedC + new Vector3(-2f, 0f, -1.5f), shedC + new Vector3(-0.6f, 0f, -1.5f));
+        BuildShedFenceRun(fence.transform, shedC + new Vector3(0.6f, 0f, -1.5f), shedC + new Vector3(2f, 0f, -1.5f));
+        BuildShedFenceRun(fence.transform, shedC + new Vector3(2f, 0f, -1.5f), shedC + new Vector3(2f, 0f, 1.5f));
+        Bounds fb = GetWorldBounds(fence);
+        NoteExpansionEntry("CattleShed_Fence", fb, 0f, false, "landmark", 4.0f, 3.0f, 1.2f, 0f, "");
+        // Two cloned animals, roam r 1.5 m — clear of every MovementTest
+        // subject's roam by 11+ m. (No second chicken: Chicken_1 is
+        // already excluded from MovementTest for a spawn-inside-collider
+        // bug, and a second chicken risks the same.)
+        GameObject cowSrc, goatSrc;
+        if (TryGetSource(VillageLayoutData.FileCow, 1.45f, out cowSrc))
+        {
+            Bounds b;
+            float minY;
+            GameObject cow2 = CloneModel(cowSrc, "Cow_2", new Vector3(-13.5f, 0f, 18.75f), 0f, false, true, out b, out minY);
+            if (cow2 != null)
+            {
+                AddAnimalRoam(cow2, new Vector3(-13.5f, 0f, 18.75f), 1.5f, 0.5f, false);
+                NoteExpansionEntry("Cow_2", b, minY, false, "animal", 1.0f, 2.0f, 1.45f, 0f, VillageLayoutData.FileCow);
+            }
+        }
+        if (TryGetSource(VillageLayoutData.FileGoat, 0.7f, out goatSrc))
+        {
+            Bounds b;
+            float minY;
+            GameObject goat2 = CloneModel(goatSrc, "Goat_2", new Vector3(-13.5f, 0f, 18.75f), 0f, false, true, out b, out minY);
+            if (goat2 != null)
+            {
+                AddAnimalRoam(goat2, new Vector3(-13.5f, 0f, 18.75f), 1.5f, 0.7f, false);
+                NoteExpansionEntry("Goat_2", b, minY, false, "animal", 0.6f, 1.2f, 0.7f, 0f, VillageLayoutData.FileGoat);
+            }
+        }
+    }
+
+    // One fence run: posts at both ends + two rails. Visual only, no Block.
+    private void BuildShedFenceRun(Transform parent, Vector3 a, Vector3 b)
+    {
+        Vector3 mid = (a + b) / 2f;
+        float len = Vector3.Distance(a, b);
+        bool alongX = Mathf.Abs(a.x - b.x) > Mathf.Abs(a.z - b.z);
+        BoxShared("CattleShed_FencePost", new Vector3(a.x, 0.6f, a.z), new Vector3(0.16f, 1.2f, 0.16f), matWood, parent);
+        BoxShared("CattleShed_FencePost", new Vector3(b.x, 0.6f, b.z), new Vector3(0.16f, 1.2f, 0.16f), matWood, parent);
+        Vector3 railSize = alongX ? new Vector3(len, 0.12f, 0.09f) : new Vector3(0.09f, 0.12f, len);
+        BoxShared("CattleShed_FenceRailTop", new Vector3(mid.x, 0.95f, mid.z), railSize, matWood, parent);
+        BoxShared("CattleShed_FenceRailLow", new Vector3(mid.x, 0.45f, mid.z), railSize, matWood, parent);
+    }
+
+    private void BuildExpansionHaystacks()
+    {
+        // MOVED (salvaged landmark positions, 2026-11-27 — the old spots
+        // overlapped the Ambassador / House_4 / House_10 against the TRUE
+        // footprints): HS_1 (1.5,13.5)->(0.5,12.5), HS_2 (11,-5)->(13,-8),
+        // HS_3 (-6,-14)->(-3.75,-14).
+        BuildHaystack("Haystack_1", new Vector3(0.5f, 0f, 12.5f));
+        BuildHaystack("Haystack_2", new Vector3(13f, 0f, -8f));
+        BuildHaystack("Haystack_3", new Vector3(-3.75f, 0f, -14f));
+    }
+
+    // Stepped-cylinder stack (no custom cone mesh — avoids winding risk):
+    // mud base + three thatch tiers, 2.2 m total. Reads as a thatched
+    // stack at village scale.
+    private void BuildHaystack(string name, Vector3 pos)
+    {
+        GameObject root = new GameObject(name);
+        root.transform.SetParent(villageRoot, false);
+        root.transform.position = pos;
+        CylinderShared(name + "_Base", pos + new Vector3(0f, 0.1f, 0f), new Vector3(1.9f, 0.2f, 1.9f), matMudDry, root.transform);
+        CylinderShared(name + "_TierLow", pos + new Vector3(0f, 0.6f, 0f), new Vector3(1.8f, 0.8f, 1.8f), matThatch, root.transform);
+        CylinderShared(name + "_TierMid", pos + new Vector3(0f, 1.35f, 0f), new Vector3(1.2f, 0.7f, 1.2f), matThatch, root.transform);
+        CylinderShared(name + "_TierTop", pos + new Vector3(0f, 1.95f, 0f), new Vector3(0.6f, 0.5f, 0.6f), matThatch, root.transform);
+        Bounds b = GetWorldBounds(root);
+        RegisterExpansionBlock(name, new Bounds(pos + new Vector3(0f, 1.1f, 0f), new Vector3(1.2f, 2.2f, 1.2f)));
+        NoteExpansionEntry(name, b, 0f, true, "landmark", 1.2f, 1.2f, 2.2f, 0f, "");
+    }
+
+    private void BuildExpansionCharpais()
+    {
+        // Charpai_1 MOVED (-4.5,3) -> (-4.0,2.5) (salvaged landmark
+        // positions, 2026-11-27; the old spot penetrated the player wall
+        // box by 0.19 m). Charpai_2 unchanged.
+        BuildCharpai("Charpai_1", new Vector3(-4.0f, 0f, 2.5f), 0f);
+        BuildCharpai("Charpai_2", new Vector3(3f, 0f, 13f), 90f);
+    }
+
+    // Primitives ONLY — the charpai GLB was deleted for a bad bake plane
+    // (911-unit slab) and must NOT be re-added (DESIGN §3). The root is
+    // unrotated; the yaw is baked into the part sizes (long axis N-S at
+    // yaw 0, E-W at yaw 90), so the live entry records world sizes.
+    private void BuildCharpai(string name, Vector3 pos, float yaw)
+    {
+        GameObject root = new GameObject(name);
+        root.transform.SetParent(villageRoot, false);
+        root.transform.position = pos;
+        float hx = (Mathf.Abs(yaw - 90f) < 1f) ? 0.86f : 0.41f;
+        float hz = (Mathf.Abs(yaw - 90f) < 1f) ? 0.41f : 0.86f;
+        float fx = hx * 2f + 0.08f;
+        float fz = hz * 2f + 0.08f;
+        foreach (float sx in new float[] { -1f, 1f })
+        {
+            foreach (float sz in new float[] { -1f, 1f })
+            {
+                BoxShared(name + "_Leg", pos + new Vector3(sx * hx, 0.175f, sz * hz), new Vector3(0.08f, 0.35f, 0.08f), matWood, root.transform);
+            }
+        }
+        BoxShared(name + "_Frame", pos + new Vector3(0f, 0.39f, 0f), new Vector3(fx, 0.08f, fz), matWood, root.transform);
+        BoxShared(name + "_Top", pos + new Vector3(0f, 0.45f, 0f), new Vector3(fx - 0.1f, 0.04f, fz - 0.1f), matWood, root.transform);
+        Bounds b = GetWorldBounds(root);
+        NoteExpansionEntry(name, b, 0f, false, "landmark", b.size.x, b.size.z, 0.47f, 0f, "");
+    }
+
+    private void BuildExpansionClotheslines()
+    {
+        // CL_1 CORRECTED (see VillageLayoutData): DESIGN §3 lists its posts
+        // at x -6.5, which falls INSIDE the player-house OBB (x -12.5..-5.5,
+        // z 3..9) and 0.5 m from the door approach (-6, 7.5) on the monster
+        // path. The same row claims "clears the player house by 1.2 m" —
+        // the posts belong EAST of the east wall at x -4.3 (-5.5 + 1.2).
+        BuildClothesline("Clothesline_1", new Vector3(-4.3f, 0f, 5.5f), new Vector3(-4.3f, 0f, 8.5f));
+        // CL_2 MOVED x 14.5 -> 14.0 (salvaged landmark positions,
+        // 2026-11-27; the old posts penetrated the pond by 0.08 m).
+        BuildClothesline("Clothesline_2", new Vector3(14.0f, 0f, 9f), new Vector3(14.0f, 0f, 11.5f));
+    }
+
+    private void BuildClothesline(string name, Vector3 postA, Vector3 postB)
+    {
+        GameObject root = new GameObject(name);
+        root.transform.SetParent(villageRoot, false);
+        root.transform.position = (postA + postB) / 2f;
+        CylinderShared(name + "_PostA", postA + new Vector3(0f, 0.95f, 0f), new Vector3(0.08f, 1.9f, 0.08f), matWood, root.transform);
+        CylinderShared(name + "_PostB", postB + new Vector3(0f, 0.95f, 0f), new Vector3(0.08f, 1.9f, 0.08f), matWood, root.transform);
+        Vector3 mid = (postA + postB) / 2f;
+        float len = Vector3.Distance(postA, postB);
+        bool alongX = Mathf.Abs(postA.x - postB.x) > Mathf.Abs(postA.z - postB.z);
+        Vector3 lineSize = alongX ? new Vector3(len, 0.04f, 0.04f) : new Vector3(0.04f, 0.04f, len);
+        BoxShared(name + "_Line", mid + new Vector3(0f, 1.8f, 0f), lineSize, matWood, root.transform);
+        Vector3 dir = (postB - postA).normalized;
+        Vector3 clothSize = alongX ? new Vector3(0.7f, 0.9f, 0.02f) : new Vector3(0.02f, 0.9f, 0.7f);
+        BoxShared(name + "_ClothA", mid - dir * (len / 6f) + new Vector3(0f, 1.35f, 0f), clothSize, matPlaster, root.transform);
+        BoxShared(name + "_ClothB", mid + dir * (len / 6f) + new Vector3(0f, 1.35f, 0f), clothSize, matPlaster, root.transform);
+        Bounds b = GetWorldBounds(root);
+        NoteExpansionEntry(name, b, 0f, false, "landmark", b.size.x, b.size.z, 1.9f, 0f, "");
+    }
+
+    private void BuildExpansionLampPosts()
+    {
+        // LP_1 MOVED (-6,10) -> (-6,10.5) and LP_3 MOVED (-10,-12) ->
+        // (-4.5,-12) (salvaged landmark positions, 2026-11-27; the old
+        // spots penetrated House_3 / the School, and LP_1's pole sat under
+        // the player's roof overhang). LP_2 / LP_4 / LP_5 unchanged.
+        BuildLampPost("LampPost_1", new Vector3(-6f, 0f, 10.5f));
+        BuildLampPost("LampPost_2", new Vector3(12f, 0f, -9f));
+        BuildLampPost("LampPost_3", new Vector3(-4.5f, 0f, -12f));
+        BuildLampPost("LampPost_4", new Vector3(18f, 0f, 16f));
+        BuildLampPost("LampPost_5", new Vector3(0f, 0f, -6f));
+    }
+
+    // Emissive ONLY — zero new real-time lights (DESIGN §8.4). The lantern
+    // is a clone of the existing ChowkLantern (Lantern_01); its glass
+    // carries the same warm emissive. No Light component anywhere here
+    // (CloneModel also strips any Light a GLB might carry).
+    private void BuildLampPost(string name, Vector3 pos)
+    {
+        GameObject root = new GameObject(name);
+        root.transform.SetParent(villageRoot, false);
+        root.transform.position = pos;
+        CylinderShared(name + "_Pole", pos + new Vector3(0f, 1.6f, 0f), new Vector3(0.24f, 3.2f, 0.24f), matWood, root.transform);
+        RegisterExpansionBlock(name, new Bounds(pos + new Vector3(0f, 1.6f, 0f), new Vector3(0.3f, 3.2f, 0.3f)));
+        GameObject lanternSrc;
+        if (TryGetSource(VillageLayoutData.FileLantern, 0.9f, out lanternSrc))
+        {
+            Bounds b;
+            float minY;
+            GameObject lantern = CloneModel(lanternSrc, name + "_Lantern", pos + new Vector3(0f, 3.2f, 0f), 0f, false, false, out b, out minY);
+            if (lantern != null) lantern.transform.SetParent(root.transform, true);
+        }
+        Bounds rb = GetWorldBounds(root);
+        NoteExpansionEntry(name, rb, 0f, true, "landmark", 0.3f, 0.3f, 4.1f, 0f, "");
+    }
+
+    // ---- Validation entry points (DESIGN §7) ----
+    // One implementation, two entry points: the runtime step calls
+    // ValidateVillage(), the editor menu (PlayMode) calls ValidateVillageNow().
+    public Transform VillageRootTransform { get { return villageRoot; } }
+
+    public List<VillageLayoutData.ExpansionEntry> GetExpansionEntries()
+    {
+        return new List<VillageLayoutData.ExpansionEntry>(_expansionLayout);
+    }
+
+    public HashSet<string> GetExpansionColliderNames()
+    {
+        return new HashSet<string>(_expansionColliderNames);
+    }
+
+    public List<string> GetExpansionNewMaterialNames()
+    {
+        return new List<string>(_expansionNewMaterials);
+    }
+
+    public int ValidateVillageNow()
+    {
+        try
+        {
+            return VillageValidator.ValidateLive(this);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("[ValidateVillage] validator threw: " + e);
+            return -1;
+        }
+    }
+
+    private void ValidateVillage()
+    {
+        int errors = ValidateVillageNow();
+        Debug.Log("[ValidateVillage] step done, errors=" + errors + " (never blocks FinishBuild)");
     }
 
     // ------------------------------------------------------------------

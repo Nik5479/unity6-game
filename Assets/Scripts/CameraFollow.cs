@@ -147,9 +147,13 @@ public class CameraFollow : MonoBehaviour
         camOccluders.Clear();
         occludersCollected = true;
         string[] roots = { "House_Player", "House_2", "House_3", "House_4", "House_5", "House_6",
+            "House_7", "House_8", "House_9", "House_10", "House_12", "House_13",
             "Temple", "School", "Haveli", "Clinic", "Dock", "Well", "Gate",
             "HeroCar", "Tractor", "Cart", "BullockCart",
             "Tree_Mango", "Tree_Banyan", "Tree_Palm" };
+        // House_11 is DROPPED (salvaged table 2026-11-27) and is NOT in
+        // this list — a missing name is skipped silently (go == null).
+        // House_13 stays: its gated-off code path could still build it.
         foreach (string name in roots)
         {
             GameObject go = GameObject.Find(name);
