@@ -533,27 +533,59 @@ public class ScreenshotTest
         wantShot.Normalize();
         float hShot = Vector3.Dot(wantShot, rightShot);
         float vShot = Vector3.Dot(wantShot, fwdShot);
+        // ROUND 8 FIX (CI run 45968261226): the fixed 2.5 s drive did NOT
+        // end pressed against the far wall — the player had only covered
+        // ~4.2 m when it expired (the 1.10 m door is a 0.20 m passable
+        // band, and a wandering animal can also cross the path), so the
+        // 1.5 s hold that followed moved him 4.95 m of free floor and
+        // the "blocked" precondition of the hold assert was false.
+        // Drive UNTIL BLOCKED instead: keep the stick held until he
+        // has not moved for 0.5 s straight (genuinely against
+        // something), capped at 6 s. The inside assert below still
+        // catches a door that cannot be passed at all (drive ends
+        // blocked outside the hut). The old 1.0 s settle is folded
+        // into the hold: the hold itself is 1.5 s of idle before
+        // shot 12 (Round 7's floating-player fix — feet planted), and
+        // a separate settle would let a wandering-animal blocker drift
+        // away and unblock him before the hold.
+        Vector3 driveStart = player.transform.position;
+        Vector3 lastMovedPos = driveStart;
+        float stillShot = 0f;
         float driveShot = 0f;
-        while (driveShot < 2.5f)
+        bool underwayShot = false;
+        bool blockedShot = false;
+        while (driveShot < 6.0f)
         {
             moveShot.SetValue(pcShot, new Vector2(hShot, vShot));
             yield return null;
             driveShot += Time.deltaTime;
+            Vector3 nowShot = player.transform.position;
+            if (!underwayShot && new Vector2(nowShot.x - driveStart.x, nowShot.z - driveStart.z).magnitude > 0.5f)
+                underwayShot = true;
+            if (underwayShot)
+            {
+                if (new Vector2(nowShot.x - lastMovedPos.x, nowShot.z - lastMovedPos.z).magnitude > 0.02f)
+                {
+                    lastMovedPos = nowShot;
+                    stillShot = 0f;
+                }
+                else
+                {
+                    stillShot += Time.deltaTime;
+                    if (stillShot >= 0.5f) { blockedShot = true; break; }
+                }
+            }
         }
         moveShot.SetValue(pcShot, Vector2.zero);
-        // ROUND 7 (floating player): the 2.5 s drive ends with Nilesh
-        // pressed against the far wall at full jog speed, and the shot
-        // below was taken one frame later -- mid-stride, one foot at
-        // knee height, hips bobbed up, so he read as FLOATING above
-        // the floor. His root is grounded the whole time (the hut
-        // floor walkable top is 0.03 m; PlayerController snaps the
-        // feet to it every frame), so this is a pose/timing artefact,
-        // not a grounding bug. Let him settle to idle (feet planted)
-        // before framing him.
-        yield return new WaitForSeconds(1.0f);
+        Debug.Log("[Test] Drive-until-blocked: ended at " + player.transform.position + " after " + driveShot.ToString("F1") + " s, underway=" + underwayShot + " blocked=" + blockedShot);
+        Assert.IsTrue(underwayShot,
+            "Drive made no progress in 6 s — player stuck at " + player.transform.position + " (door impassable?)");
+        Assert.IsTrue(blockedShot,
+            "Drive never came to a stop in 6 s — player kept moving; ended at " + player.transform.position);
         // ROUND 8 (walk-while-blocked): the drive above ends with
-        // Nilesh pressed against the far wall at full jog speed. Hold
-        // the SAME stick input into the wall for 1.5 s — the drive was
+        // Nilesh BLOCKED (drive-until-blocked stopped only once he had
+        // not moved for 0.5 s straight). Hold the SAME stick input
+        // into the wall for 1.5 s — the drive was
         // straight along -X (hShot = 0, vShot = 1 from the door-facing
         // camera), so there is no tangential slide: TryMove blocks the
         // step entirely and his real position must not change. The
