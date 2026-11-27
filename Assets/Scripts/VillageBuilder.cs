@@ -2223,20 +2223,55 @@ public class VillageBuilder : MonoBehaviour
             // Round 9 wound inward, so it is LIT from inside as well.
             // From outside it stays dark fill: its faces are backfaces
             // there with inward normals, so the sun cannot light them.
+            // ROUND 11 (ceiling light-cap fix): the pyramid is FOUR
+            // separate face meshes now, one GameObject + MeshRenderer
+            // per face under a shared "HutRoofUnderlay" parent, all
+            // sharing one ThatchUnder material (same geometry, same
+            // inward winding, same _Cull 0). URP picks additional
+            // lights PER OBJECT (URP.asset cap 2), so the old single
+            // mesh spent both slots on the two lanterns for EVERY
+            // face — the south face's second slot went to the north
+            // lantern 3.3 m away while the diya 1.35 m away was never
+            // evaluated on it. Each face now gets its own two nearest
+            // lights (south face: diya + south lantern; east face:
+            // door light + north lantern).
+            // The split alone cannot light the apex / upper slopes:
+            // the nearest light is ~1.7 m away there with N dot L
+            // ~0.5, so the material also carries a small warm
+            // emissive floor (linear 0.035, 0.022, 0.009 — lantern
+            // warm, 1 : 0.63 : 0.26). Sized from the Round 10 far
+            // slope (64,28,9): it lifts a fully unlit point to
+            // ~(52,41,24) and that slope to ~(83,51,28), inside the
+            // (60-110, 40-70, 20-40) target, without touching the
+            // already-lit north slope. No new lights, no cap change,
+            // no shadows: +3 draw calls (1 triangle each).
             GameObject roofUnder = new GameObject("HutRoofUnderlay");
             roofUnder.transform.SetParent(villageRoot, false);
             roofUnder.transform.position = new Vector3(-9f, 1.58f, 6f);
-            MeshFilter ruF = roofUnder.AddComponent<MeshFilter>();
-            ruF.mesh = BuildPyramidMesh(4.2f, 3.7f, 2.28f);
-            MeshRenderer ruR = roofUnder.AddComponent<MeshRenderer>();
             Material underMat = MakeFlat("ThatchUnder", new Color(0.32f, 0.23f, 0.14f), 0f);
             if (underMat != null) underMat.SetFloat("_Cull", 0f);
             // ROUND 10 step 3: enable the URP Lit double-sided keyword so
             // backfaces get their normals flipped for lighting (the Round 9
             // winding flip made the interior faces front-facing, but the
             // keyword is the last approved knob for the still-dark ceiling).
+            // Round 10 proved it a no-op (pixel-identical); kept, harmless.
             if (underMat != null) underMat.EnableKeyword("_DOUBLESIDED_ON");
-            ruR.material = underMat;
+            // ROUND 11: warm emissive floor — see the comment above.
+            if (underMat != null)
+            {
+                underMat.SetColor("_EmissionColor", new Color(0.035f, 0.022f, 0.009f));
+                underMat.EnableKeyword("_EMISSION");
+            }
+            string[] roofFaceNames = { "South", "East", "North", "West" };
+            for (int f = 0; f < 4; f++)
+            {
+                GameObject faceGO = new GameObject("HutRoofUnderlay_" + roofFaceNames[f]);
+                faceGO.transform.SetParent(roofUnder.transform, false);
+                MeshFilter mf = faceGO.AddComponent<MeshFilter>();
+                mf.mesh = BuildPyramidFaceMesh(f, 4.2f, 3.7f, 2.28f);
+                MeshRenderer mr = faceGO.AddComponent<MeshRenderer>();
+                mr.material = underMat;
+            }
         }
         else
         {
@@ -2487,8 +2522,11 @@ public class VillageBuilder : MonoBehaviour
         }
     }
 
-    // ROUND 6 (door visuals): a 4-sided pyramid mesh (4 side triangles,
-    // no base) — the dark thatch underlay under the hut roof.
+    // ROUND 6 (door visuals): one face of the 4-sided pyramid mesh
+    // (a single side triangle, no base) — the dark thatch underlay
+    // under the hut roof. Face 0 south, 1 east, 2 north, 3 west, in
+    // the same corner order the old whole-pyramid mesh used, so the winding
+    // and the inward normals are unchanged.
     // ROUND 9 (hut ceiling fix): wound so the normals point INWARD,
     // into the room (RecalculateNormals derives them from the winding).
     // Round 8 wound them outward and relied on the material being
@@ -2502,23 +2540,34 @@ public class VillageBuilder : MonoBehaviour
     // From outside the faces are now backfaces (still rendered, _Cull
     // 0) with inward normals, so the sun cannot light them either: the
     // pyramid still reads as dark thatch filling the roof gaps, exactly
-    // the Round 6 intent. Albedo is unchanged (0.23, 0.16, 0.10).
-    private Mesh BuildPyramidMesh(float halfX, float halfZ, float height)
+    // the Round 6 intent. Albedo is (0.32, 0.23, 0.14) after the
+    // Round 10 step 2 lighten (was 0.23, 0.16, 0.10).
+    // ROUND 11: one mesh per face (was one mesh for all four) so URP's
+    // per-object additional-light selection (cap 2) runs per face:
+    // each face gets its own two nearest lights instead of sharing
+    // the pair picked for the pyramid centre. Callers pass face 0-3;
+    // any other value falls through to the west face (default).
+    private Mesh BuildPyramidFaceMesh(int face, float halfX, float halfZ, float height)
     {
         Vector3 apex = new Vector3(0f, height, 0f);
         Vector3 c0 = new Vector3(-halfX, 0f, -halfZ);
         Vector3 c1 = new Vector3(halfX, 0f, -halfZ);
         Vector3 c2 = new Vector3(halfX, 0f, halfZ);
         Vector3 c3 = new Vector3(-halfX, 0f, halfZ);
+        Vector3 a, b;
+        switch (face)
+        {
+            case 0: a = c0; b = c1; break; // south face (-z), normal now inward (+z, down)
+            case 1: a = c1; b = c2; break; // east face (+x), normal now inward (-x, down)
+            case 2: a = c2; b = c3; break; // north face (+z), normal now inward (-z, down)
+            default: a = c3; b = c0; break; // west face (-x), normal now inward (+x, down)
+        }
         Mesh m = new Mesh();
-        m.name = "Pyramid";
+        m.name = "PyramidFace" + face;
         m.vertices = new Vector3[] {
-            apex, c0, c1,   // south face (-z), normal now inward (+z, down)
-            apex, c1, c2,   // east face (+x), normal now inward (-x, down)
-            apex, c2, c3,   // north face (+z), normal now inward (-z, down)
-            apex, c3, c0    // west face (-x), normal now inward (+x, down)
+            apex, a, b
         };
-        m.triangles = new int[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+        m.triangles = new int[] { 0, 1, 2 };
         m.RecalculateNormals();
         return m;
     }

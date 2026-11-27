@@ -64,6 +64,18 @@ public class ScreenshotTest
         // shots must be taken from OUTSIDE (see the dusk block below).
         Vector3 spawnPos = player.transform.position;
 
+        // ROUND 11 (2026-11-27): freeze the Wolf off the door approach
+        // BEFORE any shot is taken. Round 10 evidence: the Wolf roams
+        // from home (-6,0,8) — on the door approach, inside its 4 m
+        // roam radius — and blocked shot 12 (player-inside-house.png)
+        // in 2 of 3 steps by wandering into the doorway while the
+        // drive-until-blocked loop ran. Freezing in place is NOT enough
+        // (it may already be standing on the path), so FreezeWolfOffPath
+        // also parks it in the far south-west corner. Runs here, right
+        // after the models have loaded and the player exists, so no
+        // earlier shot is affected by a roaming animal either.
+        FreezeWolfOffPath();
+
         // Phase 1 village: GameManager builds the village at runtime.
         var gm = GameObject.Find("GameManager");
         Assert.IsNotNull(gm, "GameManager not found in Main scene");
@@ -819,5 +831,69 @@ public class ScreenshotTest
         Object[] found = Object.FindObjectsOfType(t);
         if (found == null || found.Length == 0) return null;
         return found[0] as Component;
+    }
+
+    // ROUND 11: park the Wolf where it can never block the door drive.
+    // Verified against VillageColliders (defined in VillageBuilder.cs,
+    // NOT a separate VillageColliders.cs): a dynamic blocker is a circle
+    // that FOLLOWS its Transform — CanMoveToDynamic reads d.t.position
+    // live on every check — so teleporting the Wolf moves its blocker
+    // with it. But disabling AnimalRoam alone does NOT remove the
+    // blocker: it is only unregistered in OnDestroy, and neither
+    // Behaviour.enabled = false nor SetActive(false) calls that, so a
+    // merely-disabled Wolf would leave a phantom blocker standing on
+    // the path. Hence all three steps: disable roaming, teleport far
+    // away, AND unregister the dynamic blocker (reflection — the test
+    // assembly cannot reference game classes). A missing Wolf only
+    // warns; it never fails the test.
+    private void FreezeWolfOffPath()
+    {
+        GameObject wolf = GameObject.Find("Wolf");
+        Component roam = null;
+        System.Type roamType = FindType("AnimalRoam");
+        if (wolf == null && roamType != null)
+        {
+            // Fall back to the AnimalRoam with isWolf == true, in case
+            // the GameObject name ever differs from "Wolf".
+            Object[] roams = Object.FindObjectsOfType(roamType);
+            foreach (Object o in roams)
+            {
+                Component c = o as Component;
+                if (c == null) continue;
+                FieldInfo wolfField = roamType.GetField("isWolf");
+                if (wolfField != null && (bool)wolfField.GetValue(c))
+                {
+                    wolf = c.gameObject;
+                    roam = c;
+                    break;
+                }
+            }
+        }
+        if (wolf == null)
+        {
+            Debug.LogWarning("[Test] ROUND 11: Wolf not found — freeze skipped, the door drive may still be blocked");
+            return;
+        }
+        if (roam == null && roamType != null)
+            roam = wolf.GetComponent(roamType) as Component;
+        Vector3 oldPos = wolf.transform.position;
+        Behaviour roamBehaviour = roam as Behaviour;
+        if (roamBehaviour != null) roamBehaviour.enabled = false;
+        // Park in the far south-west corner: ~28 m from the door
+        // approach (door centre ~(-6, 7.5)), clear of the drive path
+        // and of every shot framing (shot 12 is inside the house).
+        wolf.transform.position = new Vector3(-19f, 0f, -19f);
+        // Drop the dynamic blocker entirely (belt-and-braces: the
+        // teleport already moved it with the Wolf, since it follows
+        // the Transform — this leaves no blocker anywhere at all).
+        System.Type collidersType = FindType("VillageColliders");
+        if (collidersType != null)
+        {
+            MethodInfo unregister = collidersType.GetMethod("UnregisterDynamic");
+            if (unregister != null)
+                unregister.Invoke(null, new object[] { wolf.transform });
+        }
+        Debug.Log("[Test] ROUND 11: Wolf frozen — AnimalRoam disabled, moved "
+            + oldPos + " -> (-19, 0, -19), dynamic blocker unregistered");
     }
 }
