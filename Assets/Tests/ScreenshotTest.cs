@@ -538,6 +538,16 @@ public class ScreenshotTest
             driveShot += Time.deltaTime;
         }
         moveShot.SetValue(pcShot, Vector2.zero);
+        // ROUND 7 (floating player): the 2.5 s drive ends with Nilesh
+        // pressed against the far wall at full jog speed, and the shot
+        // below was taken one frame later -- mid-stride, one foot at
+        // knee height, hips bobbed up, so he read as FLOATING above
+        // the floor. His root is grounded the whole time (the hut
+        // floor walkable top is 0.03 m; PlayerController snaps the
+        // feet to it every frame), so this is a pose/timing artefact,
+        // not a grounding bug. Let him settle to idle (feet planted)
+        // before framing him.
+        yield return new WaitForSeconds(1.0f);
         // Hard assert: the player is INSIDE the house now.
         System.Type gmTypeShot = FindType("GameManager");
         Assert.IsNotNull(gmTypeShot, "GameManager type not found for inside check");

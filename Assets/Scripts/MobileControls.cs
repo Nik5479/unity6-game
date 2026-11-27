@@ -36,6 +36,14 @@ public class MobileControls : MonoBehaviour
     private bool doorPromptShown;
     private SpriteRenderer doorPromptIcon;
     public bool DoorPromptActive { get; private set; }
+    // SMOOTHNESS (2026-11-27): cached per-frame lookups. Camera.main is
+    // a tag search and GetComponent<Image> is a native call; both ran
+    // every frame in UpdateDoorPrompt / SetActionPrompt. The action
+    // button's Image is cached at build time; the camera is cached
+    // lazily (it exists by the time the prompt can show).
+    private Image actionButtonImage;
+    private Camera mainCam;
+    private bool lastActionPromptState;
 
     private static readonly Color kBtnColor = new Color(0.12f, 0.12f, 0.16f, 0.62f);
     private static readonly Color kBtnOnColor = new Color(0.85f, 0.55f, 0.15f, 0.85f);
@@ -203,10 +211,10 @@ public class MobileControls : MonoBehaviour
             if (doorPromptIcon != null)
             {
                 doorPromptIcon.gameObject.SetActive(true);
-                Camera cam = Camera.main;
-                if (cam != null)
+                if (mainCam == null) mainCam = Camera.main;
+                if (mainCam != null)
                 {
-                    doorPromptIcon.transform.LookAt(cam.transform.position);
+                    doorPromptIcon.transform.LookAt(mainCam.transform.position);
                 }
             }
             if (!doorPromptShown)
@@ -238,19 +246,23 @@ public class MobileControls : MonoBehaviour
 
     private void SetActionPrompt(bool on)
     {
-        if (actionButton == null) return;
-        Image img = actionButton.GetComponent<Image>();
-        if (img == null) return;
+        if (actionButton == null || actionButtonImage == null) return;
         if (on)
         {
             float pulse = 0.5f + 0.5f * Mathf.Sin(Time.time * 6f);
-            img.color = Color.Lerp(kBtnColor, kBtnOnColor, 0.6f + 0.4f * pulse);
+            actionButtonImage.color = Color.Lerp(kBtnColor, kBtnOnColor, 0.6f + 0.4f * pulse);
             actionButton.transform.localScale = Vector3.one * (1f + 0.15f * pulse);
+            lastActionPromptState = true;
         }
-        else
+        else if (lastActionPromptState)
         {
-            img.color = kBtnColor;
+            // Off state: apply ONCE when leaving the prompt. The old code
+            // re-set colour + RectTransform scale every frame while off,
+            // which dirties the HUD canvas and forces a full UI rebuild
+            // every frame even when nothing on screen is changing.
+            actionButtonImage.color = kBtnColor;
             actionButton.transform.localScale = Vector3.one;
+            lastActionPromptState = false;
         }
     }
 
@@ -468,6 +480,7 @@ public class MobileControls : MonoBehaviour
         Button actionBtn = MakeIconButton(hudRoot, "ActionBtn", ControlIcons.IconKind.Hand,
             new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-62f, 62f), new Vector2(86f, 86f));
         actionButton = actionBtn;
+        actionButtonImage = actionBtn.GetComponent<Image>();
         actionBtn.onClick.AddListener(delegate { AudioManager.PlayUIClick(); if (player != null) player.Interact(); });
 
         Button jumpBtn = MakeIconButton(hudRoot, "JumpBtn", ControlIcons.IconKind.Jump,

@@ -393,12 +393,21 @@ public class AudioManager : MonoBehaviour
     // ------------------------------------------------------------------
     private class AudioListenerFollow : MonoBehaviour
     {
+        // SMOOTHNESS (2026-11-27): Camera.main is a tag search — it ran
+        // every frame here. The main camera never changes at runtime,
+        // so cache its transform once (retry while null).
+        private Transform camT;
+
         void LateUpdate()
         {
-            Camera cam = Camera.main;
-            if (cam == null) return;
-            transform.position = cam.transform.position;
-            transform.rotation = cam.transform.rotation;
+            if (camT == null)
+            {
+                Camera cam = Camera.main;
+                if (cam == null) return;
+                camT = cam.transform;
+            }
+            transform.position = camT.position;
+            transform.rotation = camT.rotation;
         }
     }
 }

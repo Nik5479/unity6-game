@@ -38,6 +38,9 @@ public class MonsterKnock : MonoBehaviour
     private int knocksDone;
     private float nextKnockAt;
     private bool chaseMode;
+    // SMOOTHNESS (2026-11-27): cached PlayerController — CanSensePlayer
+    // used to GetComponent it on every call (up to twice a frame).
+    private PlayerController cachedPlayerController;
 
     // OVERNIGHT R2: A* path following (VillagePathfinder) + senses.
     // The old WalkToward was straight-line MoveTowards — the monster
@@ -167,11 +170,18 @@ public class MonsterKnock : MonoBehaviour
         }
         else if (stage == 3)
         {
+            // SMOOTHNESS (2026-11-27): sense ONCE per frame. CanSensePlayer
+            // runs a grid line-of-sight walk (up to ~50 CanMoveTo probes
+            // at 20 m); the old code called it twice a frame here (entry
+            // check + lose-sight check) with identical inputs, since
+            // nothing moves between the two calls. Same result, half the
+            // probes.
+            bool sensed = CanSensePlayer();
             // If the player left the house, the monster chases instead —
             // OVERNIGHT R2: only when it can sense the player (see/hear).
             // A player standing silently far away in the dark is NOT
             // chased mid-knock; the knocks continue.
-            if (PlayerOutsideHouse() && CanSensePlayer())
+            if (PlayerOutsideHouse() && sensed)
             {
                 chaseMode = true;
             }
@@ -194,7 +204,7 @@ public class MonsterKnock : MonoBehaviour
                 // OVERNIGHT R2: lose the trail — if it can neither see
                 // nor hear the player for 4 s and the player is far, it
                 // gives up the chase and returns to the door to knock.
-                if (CanSensePlayer())
+                if (sensed)
                 {
                     loseSightT = 0f;
                 }
@@ -318,7 +328,10 @@ public class MonsterKnock : MonoBehaviour
         Vector3 toPlayer = Flat(player.position) - Flat(monster.position);
         float dist = toPlayer.magnitude;
         if (dist < 2.5f) return true;
-        PlayerController pc = player.GetComponent<PlayerController>();
+        // Cached (player is known non-null here — early return above).
+        if (cachedPlayerController == null)
+            cachedPlayerController = player.GetComponent<PlayerController>();
+        PlayerController pc = cachedPlayerController;
         // BHOOT GAON (Round 6): Jog is now 4.5 m/s, so the hearing
         // threshold rises 4.5 -> 5.0 — Jog stays quiet, only a full
         // Run (6.5) is loud enough for the monster to hear.
