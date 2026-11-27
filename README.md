@@ -198,3 +198,9 @@ buffer has a fatal error for the game, or the gameplay screenshots look black.
 2. Realistic Nilesh model (user to send `indian_man.glb`) + Mixamo walk/idle.
 3. Chapter 2+: Meera, Mukhiya, school register, temple + tunnel,
    more houses, full village (25–30 houses).
+
+## Engineering foundation
+
+See [ENGINEERING_SETUP.md](ENGINEERING_SETUP.md) for the Unity 6 engineering setup adopted from the Sheru Bhai Life Simulator Game v9 build-spec analysis (full findings in `Nik5479/reverse-engineering-anything`, `targets/sheru-bhai-life-simulator/notes.md`).
+
+The game stays THE FORGOTTEN VILLAGE (Bhairavpur, hero Nilesh) — only the engineering foundation was adopted; no Sheru assets, code, IDs, or brand were copied.
