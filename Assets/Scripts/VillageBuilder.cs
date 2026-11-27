@@ -2231,6 +2231,11 @@ public class VillageBuilder : MonoBehaviour
             MeshRenderer ruR = roofUnder.AddComponent<MeshRenderer>();
             Material underMat = MakeFlat("ThatchUnder", new Color(0.32f, 0.23f, 0.14f), 0f);
             if (underMat != null) underMat.SetFloat("_Cull", 0f);
+            // ROUND 10 step 3: enable the URP Lit double-sided keyword so
+            // backfaces get their normals flipped for lighting (the Round 9
+            // winding flip made the interior faces front-facing, but the
+            // keyword is the last approved knob for the still-dark ceiling).
+            if (underMat != null) underMat.EnableKeyword("_DOUBLESIDED_ON");
             ruR.material = underMat;
         }
         else
