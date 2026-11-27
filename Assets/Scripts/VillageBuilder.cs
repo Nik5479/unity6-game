@@ -2212,7 +2212,7 @@ public class VillageBuilder : MonoBehaviour
             // light — same warm colour, shadowless. Village total goes
             // 10 -> 11 realtime point lights, all shadowless; no object
             // evaluates more than the per-object cap either way.
-            BuildHutCeilingLantern(new Vector3(-9.3f, 2.28f, 5.0f), "South", "HutCeilingLanternLightSouth", 1.2f, 6.0f);
+            BuildHutCeilingLantern(new Vector3(-9.3f, 2.28f, 5.0f), "South", "HutCeilingLanternLightSouth", 1.8f, 6.0f);
             // ROUND 6 (door visuals): dark thatch underlay under the hut
             // roof. The thatch is 4 separate plates with gaps between
             // them — the gaps read as black holes in the phone photo
