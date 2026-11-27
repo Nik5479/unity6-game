@@ -509,6 +509,9 @@ public class ScreenshotTest
         bool openShot = (bool)dcShot.GetType().GetProperty("IsOpen").GetValue(dcShot, null);
         Assert.IsTrue(openShot, "Door did not open via TryInteract — the phone flow is broken");
         // Shot 11: open door from the front (east), player in frame.
+        // ROUND 8: the door is at the model's REAL opening now, so the
+        // shot must show the real lit interior through it — not a mud
+        // wall and no fake dark quad (deleted).
         Behaviour followD = cam.GetComponent("CameraFollow") as Behaviour;
         if (followD != null) followD.enabled = false;
         cam.transform.position = new Vector3(doorCenterShot.x + 4.5f, 2.0f, doorCenterShot.z);
@@ -548,6 +551,39 @@ public class ScreenshotTest
         // not a grounding bug. Let him settle to idle (feet planted)
         // before framing him.
         yield return new WaitForSeconds(1.0f);
+        // ROUND 8 (walk-while-blocked): the drive above ends with
+        // Nilesh pressed against the far wall at full jog speed. Hold
+        // the SAME stick input into the wall for 1.5 s — the drive was
+        // straight along -X (hShot = 0, vShot = 1 from the door-facing
+        // camera), so there is no tangential slide: TryMove blocks the
+        // step entirely and his real position must not change. The
+        // animator must then read Idle (the Round 7 bug was the walk
+        // clip playing in place here, because it trusted the
+        // controller's intended speed). The NileshAnimator state is
+        // read by reflection (test assembly cannot reference game
+        // classes); "current" is its private clip-name field.
+        Vector3 blockedPos = player.transform.position;
+        float blockedHold = 0f;
+        while (blockedHold < 1.5f)
+        {
+            moveShot.SetValue(pcShot, new Vector2(hShot, vShot));
+            yield return null;
+            blockedHold += Time.deltaTime;
+        }
+        moveShot.SetValue(pcShot, Vector2.zero);
+        Vector3 blockedEnd = player.transform.position;
+        float blockedMoved = new Vector2(blockedEnd.x - blockedPos.x, blockedEnd.z - blockedPos.z).magnitude;
+        Debug.Log("[Test] Blocked hold: moved " + blockedMoved.ToString("F3") + " m in 1.5 s with stick held into the wall");
+        Assert.LessOrEqual(blockedMoved, 0.1f,
+            "Player moved " + blockedMoved.ToString("F2") + " m while pushing into the wall — not actually blocked, idle assert below is meaningless");
+        Component animShot = FindComponent("NileshAnimator");
+        Assert.IsNotNull(animShot, "NileshAnimator not found for blocked-idle check");
+        FieldInfo curField = animShot.GetType().GetField("current", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.IsNotNull(curField, "NileshAnimator.current field missing");
+        string blockedClip = (string)curField.GetValue(animShot);
+        Debug.Log("[Test] Blocked hold: animator clip = " + blockedClip);
+        Assert.AreEqual("NileshIdle", blockedClip,
+            "Animator still playing " + blockedClip + " while blocked against the wall with the stick held — walk-while-blocked fix missing");
         // Hard assert: the player is INSIDE the house now.
         System.Type gmTypeShot = FindType("GameManager");
         Assert.IsNotNull(gmTypeShot, "GameManager type not found for inside check");
@@ -559,8 +595,13 @@ public class ScreenshotTest
         // Shot 12: camera inside the house, looking at Nilesh (bed/table
         // visible) — computed from his actual end position so the shot
         // frames him wherever he stopped.
+        // ROUND 8: the z-offset is +1.0, not the old +2.2 — the door
+        // moved north (walk-in ends at z ~7.6 now), so +2.2 would park
+        // the camera at z ~9.8, 0.04 m from the north wall face (9.84)
+        // and at the thatch eave. +1.0 keeps it 1.24 m off the wall with
+        // 0.56 m of ceiling headroom (pyramid y ~2.26 there).
         Vector3 endShot = player.transform.position;
-        cam.transform.position = new Vector3(endShot.x + 3.5f, 1.7f, endShot.z + 2.2f);
+        cam.transform.position = new Vector3(endShot.x + 3.5f, 1.7f, endShot.z + 1.0f);
         cam.transform.LookAt(endShot + new Vector3(0f, 1.0f, 0f));
         yield return null;
         string shot12 = RenderScreenshot(cam, "player-inside-house.png", 1280, 720);
@@ -573,8 +614,11 @@ public class ScreenshotTest
         // ROUND 6 (door visuals + bell tower): three new shots proving
         // the hut fixes. The door is still open from shot 11/12.
         // Shot 15: the hut's east face from the north-east — the open
-        // door AND the framed east window in one frame, the same angle
-        // as the user's phone screenshot (door open, hut looks broken).
+        // door at the REAL opening AND the moved door lantern beside it
+        // in one frame, the same angle as the user's phone screenshot
+        // (door open, hut looks broken). The old "framed east window"
+        // is the door now (Round 8); the filename is kept so rounds
+        // compare shot-for-shot.
         // The player stands just outside his door, in frame.
         player.transform.position = new Vector3(doorCenterShot.x + 1.5f, 0.5f, doorCenterShot.z);
         yield return null;
@@ -587,10 +631,10 @@ public class ScreenshotTest
         string shot15 = RenderScreenshot(cam, "hut-door-window.png", 1280, 720);
         Assert.IsNotNull(shot15, "Screenshot 15 (hut door + window) failed to render");
         Assert.IsTrue(File.Exists(shot15), "Screenshot 15 file missing: " + shot15);
-        // Shot 16: through the OPEN doorway from outside — the warm
-        // doorway (matDoorwayWarm + HutDoorLight) and the lit interior,
-        // not a black hole. The player stands inside, visible through
-        // the doorway.
+        // Shot 16: through the OPEN doorway from outside — the real lit
+        // interior (HutDoorLight + the hanging ceiling lantern visible
+        // inside), not a black hole and not a mud wall. The player
+        // stands inside, visible through the doorway.
         player.transform.position = new Vector3(doorCenterShot.x - 3.0f, 0.5f, doorCenterShot.z);
         yield return null;
         yield return null;
@@ -600,6 +644,22 @@ public class ScreenshotTest
         string shot16 = RenderScreenshot(cam, "hut-interior-doorway.png", 1280, 720);
         Assert.IsNotNull(shot16, "Screenshot 16 (interior through doorway) failed to render");
         Assert.IsTrue(File.Exists(shot16), "Screenshot 16 file missing: " + shot16);
+        // ROUND 8 (hut interior lighting): the ceiling lantern must be
+        // SEEN, not just felt — shoot from inside the hut's north-east,
+        // looking south-west at the hanging lantern, with the lit
+        // ceiling (thatch underlay) above it and the player in frame.
+        // The player is still standing inside from shot 16, on the
+        // door axis; the sightline to the lantern passes ~0.4 m above
+        // his head, so the lantern reads above him, not behind him.
+        // Camera derived from the door centre (not hardcoded): 1.74 m
+        // west and 0.70 m north of it, 1.90 m up — inside the room,
+        // 0.54 m below the pyramid ceiling there (y ~2.44).
+        cam.transform.position = new Vector3(doorCenterShot.x - 1.74f, 1.9f, doorCenterShot.z + 0.7f);
+        cam.transform.LookAt(new Vector3(doorCenterShot.x - 4.24f, 2.0f, doorCenterShot.z - 0.8f));
+        yield return null;
+        string shot18 = RenderScreenshot(cam, "hut-interior-lantern.png", 1280, 720);
+        Assert.IsNotNull(shot18, "Screenshot 18 (interior lantern) failed to render");
+        Assert.IsTrue(File.Exists(shot18), "Screenshot 18 file missing: " + shot18);
         // Shot 17: the temple bell tower from the north (chowk side) —
         // the solid bell pavilion that Round 6 blocked, with the temple
         // shikhar behind it. Proves the tower is a real structure the

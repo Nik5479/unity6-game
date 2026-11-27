@@ -181,25 +181,33 @@ public class NileshAnimator : MonoBehaviour
         if (anim == null) return;
         float dt = Time.deltaTime;
         if (dt <= 0f) return;
-        // ROUND 4 WALK: the animator trusts the controller's INTENDED
-        // speed (pc.CurrentSpeed — already accel/decel-smoothed), not the
-        // position delta. The old delta measure read 0 whenever TryMove
-        // was blocked by a wall/door, so Nilesh stood Idle with the
-        // joystick held (phone video frame-20s: stick UP, idle at the
-        // door). Fallback to the delta only if the controller is missing.
-        if (pc != null)
-        {
-            speedSmooth = pc.CurrentSpeed;
-        }
-        else
-        {
-            Vector3 p = transform.position;
-            float speed = new Vector2(p.x - prevPos.x, p.z - prevPos.z).magnitude / dt;
-            prevPos = p;
-            speedSmooth = Mathf.Lerp(speedSmooth, speed, Mathf.Clamp01(dt * 8f));
-        }
+        // ROUND 8 (walk-while-blocked): the animation state follows the
+        // character's REAL movement — actual XZ position delta per
+        // frame — not the controller's INTENDED speed (pc.CurrentSpeed).
+        // CurrentSpeed stays high while the joystick is held into a
+        // wall (TryMove blocks the step, the position never changes),
+        // so trusting it played the walk/run clip in place against the
+        // wall — the phone-video bug this round fixes. A blocked
+        // Nilesh correctly idles; a sliding Nilesh (TryMove's X-only /
+        // Z-only fallback lets him slide along a wall) still moves, so
+        // he still walks. This reverses the ROUND 4 choice (trust
+        // intended speed so Nilesh would not idle at a door): idle
+        // while blocked IS the correct pose — walk-in-place was the
+        // bug, not the idle. This matches CharacterWalk, which already
+        // reads the position delta for bob/swing/footsteps.
+        // The delta is smoothed (same 8/s rate as the old fallback) so
+        // frame jitter never flickers the clip, and the 0.4 m/s idle
+        // threshold below is unchanged, so normal slow walking still
+        // animates. Instantaneous speed is clamped to 10 m/s (above
+        // the 6.5 m/s max run speed) so a teleport / test-drive jump
+        // cannot spike the animator into the Run clip.
+        Vector3 p = transform.position;
+        float speed = new Vector2(p.x - prevPos.x, p.z - prevPos.z).magnitude / dt;
+        prevPos = p;
+        speed = Mathf.Min(speed, 10f);
+        speedSmooth = Mathf.Lerp(speedSmooth, speed, Mathf.Clamp01(dt * 8f));
 
-        // Phase 1 speeds (PlayerController): walk 1.4, jog 2.5, run 4.0.
+        // Round 6 speeds (PlayerController): walk 3.2, jog 4.5, run 6.5.
         // Jog uses the run clip (there is no separate jog clip).
         // OVERNIGHT R3: airborne (player centre y > 0.6 — ground is 0.5)
         // plays the Jump clip once; crouching plays CrouchWalk.

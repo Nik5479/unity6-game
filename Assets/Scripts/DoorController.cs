@@ -22,6 +22,9 @@ public class DoorController : MonoBehaviour
     // shown only while the door is open, so an open door reveals
     // darkness instead of wall texture. Single-sided (faces east), so
     // it never blocks the view out from inside.
+    // ROUND 8: the quad is DELETED — the door moved to the model's real
+    // east opening, so an open door now reveals the real lit interior.
+    // doorwayDark stays null (never assigned); SetOpen null-checks it.
     public GameObject doorwayDark;
 
     // ROUND 4 DOOR: the world-space centre of the doorway (the closed

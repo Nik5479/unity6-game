@@ -280,9 +280,6 @@ public class VillageBuilder : MonoBehaviour
     private Material matPants;
     private Material matEye;
     private Material matLampGlass;
-    // ROUND 6 (door visuals): warm dark-brown + dim glow for the open
-    // doorway's dark quad — the near-black matDark read as a black hole.
-    private Material matDoorwayWarm;
     // OVERNIGHT R1: weathered dark grey-brown iron for the lamp pole /
     // frame. The old matDark (0.02 near-black) pole + emissive-yellow
     // head cube read as "black pole + yellow cube" by day (audit).
@@ -1160,12 +1157,6 @@ public class VillageBuilder : MonoBehaviour
         matPants = MakeFlat("Pants", new Color(0.18f, 0.16f, 0.14f), 0.4f);
         matEye = MakeEmissive("MonsterEyes", new Color(0.9f, 0.85f, 0.6f), new Color(1.4f, 1.1f, 0.35f));
         matLampGlass = MakeEmissive("LampGlass", new Color(1f, 0.85f, 0.55f), new Color(1.3f, 0.8f, 0.3f));
-        // ROUND 6 (door visuals): the open doorway's dark quad used
-        // matDark (near-black 0.02) — in the phone photo it read as a
-        // black hole, so the open door looked broken. Warm dark-brown
-        // with a dim warm glow: the doorway now reads as a lamp-lit
-        // interior instead of a void.
-        matDoorwayWarm = MakeEmissive("DoorwayWarm", new Color(0.16f, 0.10f, 0.06f), new Color(0.30f, 0.14f, 0.05f));
         // OVERNIGHT R1: lamp iron — dark grey-brown, not near-black.
         matLampPole = MakeFlat("LampPole", new Color(0.30f, 0.27f, 0.23f), 0.35f);
         // PHONE-VIDEO 2026-11-09: matMudFlat (OVERNIGHT R3, texture-less
@@ -2105,53 +2096,41 @@ public class VillageBuilder : MonoBehaviour
             float w = wb.size.x;
             float d = wb.size.z;
             float doorX = wb.max.x - playerCenter.x;
-            // ROUND 4 DOOR: doorW 1.2 -> 1.5 m (passable band 0.3 -> 0.6 m
-            // with the 0.45 m player radius), and the door + interior are
-            // parented to villageRoot (scale 1) — NOT hut.transform. The
-            // hut holder is scaled ~1.46x by Normalize, so a door parented
-            // to it rendered as a 1.8 x 3.1 m slab (phone frames 18s/22s).
-            BuildDoor(villageRoot, playerCenter, doorX, DoorSide.East, 1.5f, 2.1f);
+            // ROUND 8 (true door): the door moves to the model's REAL east
+            // opening — measured from thatched_hut_4_p31g.glb (raycast +
+            // plan/elevation maps, same parse Round 7 used): the east wall
+            // is solid at z 5.25-6.75 (the old door sat on mud) and the
+            // only through-hole is z 7.05-8.15 at floor level, narrowing
+            // to z 7.15-8.05 at y 1.5, top ~1.85 m at the centre
+            // (z 7.55). Nilesh is 1.75 m tall, so he clears the lintel by
+            // ~10 cm standing (~5 cm at walk-bob peak) walking dead
+            // centre; the collision gap is the floor-level width, so the
+            // 0.45 m player radius leaves a 0.20 m passable band.
+            // A hole CANNOT be cut in the wall mesh instead: the wall is
+            // one coarse boolean mesh (1588 tris for the whole hut shell)
+            // and whole-triangle removal at z=6 blows the hole out to
+            // y 3.46 and z 7.78 — metres past the frame. The real opening
+            // is the only honest doorway; see the Round 8 scene report.
+            const float doorZ = 7.60f;
+            const float doorW = 1.10f;
+            const float doorH = 1.85f;
+            BuildDoor(villageRoot, playerCenter, doorX, DoorSide.East, doorW, doorH, doorZ);
             BuildHouseInterior(villageRoot, playerCenter, w, d);
-            RegisterHouseDoorGap(wb, DoorSide.East, 1.5f, 2.1f);
-            // ROUND 4 DOOR: the real hut has no door frame (the primitive
-            // house gets one) — add the same wood posts + lintel so the
-            // doorway reads as a doorway, not a slab on a solid wall.
+            RegisterHouseDoorGap(wb, DoorSide.East, doorW, doorH, doorZ);
+            // ROUND 8: door frame around the REAL opening (same wood
+            // posts + lintel language as before, re-centred on doorZ).
             // Frame sits proud of the WALL face (wb.max.x + 0.22), same
             // offset as the primitive house.
             float frameX = wb.max.x + 0.22f;
-            Box("House_Player_DoorFrameL", new Vector3(frameX, 2.1f / 2f, 6f + 1.5f / 2f + 0.09f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
-            Box("House_Player_DoorFrameR", new Vector3(frameX, 2.1f / 2f, 6f - 1.5f / 2f - 0.09f), new Vector3(0.18f, 2.2f, 0.18f), matWood, villageRoot);
-            Box("House_Player_DoorFrameTop", new Vector3(frameX, 2.1f + 0.09f, 6f), new Vector3(0.18f, 0.18f, 1.5f + 0.36f), matWood, villageRoot);
-            // ROUND 4 DOOR: dark doorway behind the panel. Whether the
-            // Sketchfab wall has a real hole is unverified from the mesh
-            // data — this single-sided near-black quad (visible ONLY
-            // while the door is open, toggled by DoorController) guarantees
-            // an open door reveals darkness, not wall texture, and the
-            // player walks through darkness into the interior. Single-
-            // sided (faces east) so it never blocks the view OUT from
-            // inside. Hidden while closed, so the wooden panel shows.
-            // ROUND 6 (door visuals): the quad's material was matDark
-            // (near-black) — the open doorway read as a black hole in
-            // the phone photo. matDoorwayWarm is a warm dark-brown with
-            // a dim glow, so the doorway reads as a lamp-lit interior.
-            // The quad STAYS: the model's wall is solid behind the
-            // builder's doorway, and without it the player would see
-            // straight through the hut's back wall.
-            Material dqMat = matDoorwayWarm != null ? matDoorwayWarm : matDark;
-            if (dqMat != null)
-            {
-                GameObject darkQuad = new GameObject("House_Player_DoorwayDark");
-                darkQuad.transform.SetParent(villageRoot, false);
-                darkQuad.transform.position = new Vector3(wb.max.x + 0.03f, 1.05f, 6f);
-                darkQuad.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
-                darkQuad.transform.localScale = new Vector3(1.5f, 2.1f, 1f);
-                MeshRenderer dqR = darkQuad.AddComponent<MeshRenderer>();
-                MeshFilter dqF = darkQuad.AddComponent<MeshFilter>();
-                dqF.mesh = BuildQuadMesh();
-                dqR.material = dqMat;
-                darkQuad.SetActive(false);
-                if (playerDoor != null) playerDoor.doorwayDark = darkQuad;
-            }
+            Box("House_Player_DoorFrameL", new Vector3(frameX, doorH / 2f, doorZ + doorW / 2f + 0.09f), new Vector3(0.18f, doorH + 0.1f, 0.18f), matWood, villageRoot);
+            Box("House_Player_DoorFrameR", new Vector3(frameX, doorH / 2f, doorZ - doorW / 2f - 0.09f), new Vector3(0.18f, doorH + 0.1f, 0.18f), matWood, villageRoot);
+            Box("House_Player_DoorFrameTop", new Vector3(frameX, doorH + 0.09f, doorZ), new Vector3(0.18f, 0.18f, doorW + 0.36f), matWood, villageRoot);
+            // ROUND 8: the fake-interior quad (House_Player_DoorwayDark)
+            // is DELETED, not replaced — the doorway is a real hole now,
+            // so opening the door shows the real lit interior. Nothing
+            // takes its place: DoorController null-checks doorwayDark, and
+            // matDoorwayWarm (field + assignment) is removed as dead code. The wall behind the OLD doorway (z=6) is just
+            // solid mud wall again — no frame, no quad, no door there.
             // ROUND 4 DOOR: the real hut has no floor and no interior
             // light (BuildHouseInterior adds only table/pot/diya). Thin
             // stone slab so the interior reads as a room, not dirt, +
@@ -2180,19 +2159,33 @@ public class VillageBuilder : MonoBehaviour
             // boolean-cut holes in the phone photo — frame each one in
             // wood so the torn edge reads as a proper window. Positions
             // measured from thatched_hut_4_p31g.glb (the Cube /
-            // Material.003 bar assemblies mark each opening; the east
-            // opening is the big ground-level hole at z 7.1..8.0).
-            // The builder's door stays at z=6 — the east opening is
-            // only 1.5 m tall, the 1.8 m player would clip its lintel.
-            FrameHutWindow(wb, "East", 7.55f, 0f, 1.5f, 0.45f);
+            // Material.003 bar assemblies mark each opening).
+            // ROUND 8: the "East" call is DELETED — that opening
+            // (z 7.1..8.0) is the DOOR now, framed by the door frame
+            // above, not a window.
             FrameHutWindow(wb, "North", -11.22f, 0.74f, 1.54f, 0.33f);
             FrameHutWindow(wb, "West", 7.96f, 0.67f, 1.45f, 0.32f);
             FrameHutWindow(wb, "West", 4.18f, 0.65f, 1.43f, 0.33f);
             FrameHutWindow(wb, "South", -11.16f, 0.74f, 1.53f, 0.33f);
             // ROUND 6 (door visuals): warm light just inside the doorway
             // so the open door shows a lit interior, not darkness.
-            AddPointLight("HutDoorLight", new Vector3(wb.max.x - 0.8f, 1.6f, 6f),
+            // ROUND 8: moved to the real doorway (doorZ).
+            AddPointLight("HutDoorLight", new Vector3(wb.max.x - 0.8f, 1.6f, doorZ),
                 new Color(1f, 0.55f, 0.2f), 1.2f, 4f);
+            // ROUND 8 (hut interior lighting): the ceiling — the dark
+            // thatch-underlay pyramid (apex y 3.86 at (-9, 6)) — was
+            // near-black in player-inside-house.png, because DiyaLight
+            // sits at the south end and HutDoorLight at the door and
+            // neither reaches the ceiling. One hanging lantern near the
+            // room centre, with a single shadowless point light, so the
+            // whole room and the ceiling read lit. It hangs from the
+            // pyramid's north slope (face y ~3.37 at z 6.8) on an iron
+            // rod; its base (y 2.28) clears Nilesh's head (1.75 m) and
+            // it sits 0.8 m south of the walk-in path (z 7.60), so
+            // nobody walks into it. No collider, no shadows — one extra
+            // light evaluation on nearby objects only (URP per-object
+            // additional-light cap is 2).
+            BuildHutCeilingLantern(new Vector3(-9f, 2.40f, 6.8f));
             // ROUND 6 (door visuals): dark thatch underlay under the hut
             // roof. The thatch is 4 separate plates with gaps between
             // them — the gaps read as black holes in the phone photo
@@ -2318,22 +2311,29 @@ public class VillageBuilder : MonoBehaviour
     // Collision for a real hut used as the player's house: the hut's walls
     // as AABBs, with a door-sized gap on the door face (same pattern as the
     // primitive house) so the player can only enter through the door.
-    private void RegisterHouseDoorGap(Bounds hb, DoorSide side, float doorW, float doorH)
+    // ROUND 8: gapZ — the gap is NOT centred on the hut (the real east
+    // opening sits north of centre, z 7.60), so the two face segments
+    // have different lengths. Back/side walls stay centred on the hut.
+    private void RegisterHouseDoorGap(Bounds hb, DoorSide side, float doorW, float doorH, float gapZ)
     {
         float wallH = Mathf.Min(hb.size.y, 4f);
         float cx = hb.center.x;
         float cz = hb.center.z;
         float faceX = (side == DoorSide.East) ? hb.max.x : hb.min.x;
         float backX = (side == DoorSide.East) ? hb.min.x : hb.max.x;
-        float segLen = (hb.size.z - doorW) / 2f;
-        if (segLen > 0.1f)
+        float southLen = (gapZ - doorW / 2f) - hb.min.z;
+        float northLen = hb.max.z - (gapZ + doorW / 2f);
+        if (southLen > 0.1f)
         {
-            Block(new Vector3(faceX, wallH / 2f, cz - hb.size.z / 2f + segLen / 2f),
-                new Vector3(0.6f, wallH, segLen));
-            Block(new Vector3(faceX, wallH / 2f, cz + hb.size.z / 2f - segLen / 2f),
-                new Vector3(0.6f, wallH, segLen));
+            Block(new Vector3(faceX, wallH / 2f, hb.min.z + southLen / 2f),
+                new Vector3(0.6f, wallH, southLen));
         }
-        Block(new Vector3(faceX, doorH + (wallH - doorH) / 2f, cz),
+        if (northLen > 0.1f)
+        {
+            Block(new Vector3(faceX, wallH / 2f, hb.max.z - northLen / 2f),
+                new Vector3(0.6f, wallH, northLen));
+        }
+        Block(new Vector3(faceX, doorH + (wallH - doorH) / 2f, gapZ),
             new Vector3(0.6f, wallH - doorH, doorW));
         Block(new Vector3(backX, wallH / 2f, cz),
             new Vector3(0.6f, wallH, hb.size.z));
@@ -2406,7 +2406,9 @@ public class VillageBuilder : MonoBehaviour
 
         if (isPlayerHouse)
         {
-            BuildDoor(root, center, doorX, doorSide, doorW, doorH);
+            // ROUND 8: primitive fallback — its door stays centred on
+            // the house (doorZ = center.z), same as before.
+            BuildDoor(root, center, doorX, doorSide, doorW, doorH, center.z);
             BuildHouseInterior(root, center, w, d);
         }
     }
@@ -2489,12 +2491,14 @@ public class VillageBuilder : MonoBehaviour
         Box(name + "_WindowBarH", new Vector3(pos.x, pos.y, fz), new Vector3(0.8f, 0.07f, 0.06f), matWood, root);
     }
 
-    private void BuildDoor(Transform root, Vector3 center, float doorX, DoorSide doorSide, float doorW, float doorH)
+    private void BuildDoor(Transform root, Vector3 center, float doorX, DoorSide doorSide, float doorW, float doorH, float doorZ)
     {
         // Hinge pivot at one edge of the doorway.
         float closedYaw = (doorSide == DoorSide.East) ? 90f : -90f;
         float openYaw = closedYaw + ((doorSide == DoorSide.East) ? -100f : 100f);
-        Vector3 hingePos = center + new Vector3(doorX, 0f, doorW / 2f);
+        // ROUND 8: the doorway sits at doorZ, not center.z — the real
+        // east opening is north of the hut centre.
+        Vector3 hingePos = new Vector3(center.x + doorX, 0f, doorZ + doorW / 2f);
 
         GameObject hinge = new GameObject("Door_Player");
         hinge.transform.SetParent(root, false);
@@ -2526,8 +2530,57 @@ public class VillageBuilder : MonoBehaviour
         GameObject front = new GameObject("DoorFront");
         front.transform.SetParent(root, false);
         float outDir = (doorSide == DoorSide.East) ? 1f : -1f;
-        front.transform.position = center + new Vector3(doorX + outDir * 2.0f, 0f, 0f);
+        front.transform.position = new Vector3(center.x + doorX + outDir * 2.0f, 0f, doorZ);
         doorFront = front.transform;
+    }
+
+    // A hanging-lamp part must never block the player/camera (Unity
+    // colliders are not used by PlayerController, but the camera raycasts
+    // them) and must not cast a shadow (same rule as the Round 7 scene
+    // lantern, whose parts are all m_CastShadows 0).
+    private static void DressLanternPart(GameObject go)
+    {
+        if (go == null) return;
+        Collider c = go.GetComponent<Collider>();
+        if (c != null) Destroy(c);
+        Renderer r = go.GetComponent<Renderer>();
+        if (r != null) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+    }
+
+    // ROUND 8 (hut interior lighting): hanging lantern + the room's main
+    // light. Same construction language as the Round 7 scene lantern and
+    // the chowk lamp (iron rod + wood frame + emissive glass core), all
+    // realistic PBR materials already in the project — no new material,
+    // no new texture. centre = the glass core position; the rod runs up
+    // from the cap to the ceiling above (the caller picks a spot where
+    // the pyramid face is ~0.9 m above the cap, so the rod reads as
+    // hanging from the roof, not floating). Exactly ONE extra point
+    // light, shadowless (AddPointLight never enables shadows).
+    private void BuildHutCeilingLantern(Vector3 centre)
+    {
+        GameObject rod = Box("HutCeilingLanternRod",
+            centre + new Vector3(0f, 0.575f, 0f), new Vector3(0.03f, 0.95f, 0.03f), matLampPole, villageRoot);
+        DressLanternPart(rod);
+        GameObject cap = Box("HutCeilingLanternCap",
+            centre + new Vector3(0f, 0.10f, 0f), new Vector3(0.24f, 0.05f, 0.24f), matWood, villageRoot);
+        DressLanternPart(cap);
+        GameObject glass = Sphere("HutCeilingLanternGlass",
+            centre, new Vector3(0.15f, 0.15f, 0.15f), matLampGlass, villageRoot);
+        DressLanternPart(glass);
+        GameObject bas = Box("HutCeilingLanternBase",
+            centre + new Vector3(0f, -0.10f, 0f), new Vector3(0.22f, 0.04f, 0.22f), matWood, villageRoot);
+        DressLanternPart(bas);
+        float p = 0.09f;
+        DressLanternPart(Box("HutCeilingLanternPostA",
+            centre + new Vector3(p, 0f, p), new Vector3(0.025f, 0.16f, 0.025f), matWood, villageRoot));
+        DressLanternPart(Box("HutCeilingLanternPostB",
+            centre + new Vector3(-p, 0f, p), new Vector3(0.025f, 0.16f, 0.025f), matWood, villageRoot));
+        DressLanternPart(Box("HutCeilingLanternPostC",
+            centre + new Vector3(p, 0f, -p), new Vector3(0.025f, 0.16f, 0.025f), matWood, villageRoot));
+        DressLanternPart(Box("HutCeilingLanternPostD",
+            centre + new Vector3(-p, 0f, -p), new Vector3(0.025f, 0.16f, 0.025f), matWood, villageRoot));
+        AddPointLight("HutCeilingLanternLight", centre,
+            new Color(1f, 0.6f, 0.25f), 2.0f, 7.5f);
     }
 
     private void BuildHouseInterior(Transform root, Vector3 center, float w, float d)
