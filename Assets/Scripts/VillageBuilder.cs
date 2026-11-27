@@ -2174,25 +2174,55 @@ public class VillageBuilder : MonoBehaviour
                 new Color(1f, 0.55f, 0.2f), 1.2f, 4f);
             // ROUND 8 (hut interior lighting): the ceiling — the dark
             // thatch-underlay pyramid (apex y 3.86 at (-9, 6)) — was
-            // near-black in player-inside-house.png, because DiyaLight
-            // sits at the south end and HutDoorLight at the door and
-            // neither reaches the ceiling. One hanging lantern near the
-            // room centre, with a single shadowless point light, so the
-            // whole room and the ceiling read lit. It hangs from the
-            // pyramid's north slope (face y ~3.37 at z 6.8) on an iron
-            // rod; its base (y 2.28) clears Nilesh's head (1.75 m) and
-            // it sits 0.8 m south of the walk-in path (z 7.60), so
-            // nobody walks into it. No collider, no shadows — one extra
-            // light evaluation on nearby objects only (URP per-object
-            // additional-light cap is 2).
+            // near-black in player-inside-house.png. Round 8 blamed
+            // reach (DiyaLight at the south end, HutDoorLight at the
+            // door) and added one hanging lantern near the room centre.
+            // ROUND 9 CORRECTION: reach was NOT the cause. The Round 8
+            // screenshots prove it — the GLB thatch 1 m from the new
+            // lantern lights up bright warm, while the pyramid at the
+            // same distance stays RGB ~(22,13,6). The pyramid's normals
+            // pointed OUTWARD (BuildPyramidMesh) and URP Lit has no
+            // backface normal-flip, so from inside N dot L <= 0 for
+            // every light below the ceiling; _Cull 0 only makes the
+            // backfaces visible, never lit. The fix is the winding flip
+            // in BuildPyramidMesh (normals now point into the room), so
+            // all three existing interior lights can finally light it.
+            // One hanging lantern near the room centre, with a single
+            // shadowless point light. It hangs from the pyramid's north
+            // slope (face y ~3.37 at z 6.8) on an iron rod; its base
+            // (y 2.28) clears Nilesh's head (1.75 m) and it sits 0.8 m
+            // south of the walk-in path (z 7.60), so nobody walks into
+            // it. No collider, no shadows — one extra light evaluation
+            // on nearby objects only (URP per-object additional-light
+            // cap is 2, per the Round 8 report).
             BuildHutCeilingLantern(new Vector3(-9f, 2.40f, 6.8f));
+            // ROUND 9 (ceiling wash, second lantern): the winding flip
+            // lets the north lantern light the north/east/west slopes
+            // and the apex, but the south slope is 3.5-4.5 m from it
+            // and may lose its slot to the door/diya light under the
+            // per-object cap, so it would stay dim in shot 12's far
+            // ceiling. One more hanging lantern, same builder, over the
+            // south room: glass (-9.3, 2.28, 5.0), south face y ~3.24
+            // there, rod top 3.33 (embeds 0.09, same as the north
+            // lantern), base bottom y 2.16 clears Nilesh's head by
+            // 0.41 m. x -9.3 (not -9) keeps it 0.4 m clear of the N-S
+            // partition plane at x ~-8.9; z 5.0 sits just south of the
+            // E-W partition (z 5.5-5.9), i.e. one lantern per room.
+            // Dimmer on purpose (1.2 / 6.0) — a wash, not a second hero
+            // light — same warm colour, shadowless. Village total goes
+            // 10 -> 11 realtime point lights, all shadowless; no object
+            // evaluates more than the per-object cap either way.
+            BuildHutCeilingLantern(new Vector3(-9.3f, 2.28f, 5.0f), "South", "HutCeilingLanternLightSouth", 1.2f, 6.0f);
             // ROUND 6 (door visuals): dark thatch underlay under the hut
             // roof. The thatch is 4 separate plates with gaps between
             // them — the gaps read as black holes in the phone photo
             // ('roof messy'). A dark-brown pyramid just inside the
             // thatch (base 8.4 x 7.4 m at the eave, apex at the ridge)
             // fills every gap with dark thatch instead of void.
-            // Double-sided (visible from inside the hut too).
+            // Double-sided (visible from inside the hut too) — and from
+            // Round 9 wound inward, so it is LIT from inside as well.
+            // From outside it stays dark fill: its faces are backfaces
+            // there with inward normals, so the sun cannot light them.
             GameObject roofUnder = new GameObject("HutRoofUnderlay");
             roofUnder.transform.SetParent(villageRoot, false);
             roofUnder.transform.position = new Vector3(-9f, 1.58f, 6f);
@@ -2453,9 +2483,21 @@ public class VillageBuilder : MonoBehaviour
     }
 
     // ROUND 6 (door visuals): a 4-sided pyramid mesh (4 side triangles,
-    // no base) — the dark thatch underlay under the hut roof. Wound so
-    // the normals point outward (RecalculateNormals from the winding);
-    // the material is set double-sided anyway (visible from inside too).
+    // no base) — the dark thatch underlay under the hut roof.
+    // ROUND 9 (hut ceiling fix): wound so the normals point INWARD,
+    // into the room (RecalculateNormals derives them from the winding).
+    // Round 8 wound them outward and relied on the material being
+    // double-sided — but _Cull 0 only makes backfaces VISIBLE, it does
+    // not flip their normals, and URP Lit has no backface normal-flip
+    // mode: from inside, every interior light sits below the ceiling,
+    // so N dot L was <= 0 on all four faces and the pyramid rendered
+    // near-black (RGB ~22,13,6 in the Round 8 shots) even 1 m from a
+    // 2.0 light, while the GLB thatch beside it lit up warm. Flipping
+    // the winding is the fix — no extra light could have lit it before.
+    // From outside the faces are now backfaces (still rendered, _Cull
+    // 0) with inward normals, so the sun cannot light them either: the
+    // pyramid still reads as dark thatch filling the roof gaps, exactly
+    // the Round 6 intent. Albedo is unchanged (0.23, 0.16, 0.10).
     private Mesh BuildPyramidMesh(float halfX, float halfZ, float height)
     {
         Vector3 apex = new Vector3(0f, height, 0f);
@@ -2466,10 +2508,10 @@ public class VillageBuilder : MonoBehaviour
         Mesh m = new Mesh();
         m.name = "Pyramid";
         m.vertices = new Vector3[] {
-            apex, c1, c0,   // south face (-z)
-            apex, c2, c1,   // east face (+x)
-            apex, c3, c2,   // north face (+z)
-            apex, c0, c3    // west face (-x)
+            apex, c0, c1,   // south face (-z), normal now inward (+z, down)
+            apex, c1, c2,   // east face (+x), normal now inward (-x, down)
+            apex, c2, c3,   // north face (+z), normal now inward (-z, down)
+            apex, c3, c0    // west face (-x), normal now inward (+x, down)
         };
         m.triangles = new int[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
         m.RecalculateNormals();
@@ -2554,33 +2596,37 @@ public class VillageBuilder : MonoBehaviour
     // no new texture. centre = the glass core position; the rod runs up
     // from the cap to the ceiling above (the caller picks a spot where
     // the pyramid face is ~0.9 m above the cap, so the rod reads as
-    // hanging from the roof, not floating). Exactly ONE extra point
-    // light, shadowless (AddPointLight never enables shadows).
-    private void BuildHutCeilingLantern(Vector3 centre)
+    // hanging from the roof, not floating). Exactly ONE point light per
+    // lantern, shadowless (AddPointLight never enables shadows).
+    // ROUND 9: tag / lightName / intensity / range are parameters so a
+    // second lantern can reuse this builder without duplicate
+    // GameObject names. Defaults keep the original north lantern
+    // identical (same part names, same light, 2.0 / 7.5).
+    private void BuildHutCeilingLantern(Vector3 centre, string tag = "", string lightName = "HutCeilingLanternLight", float intensity = 2.0f, float range = 7.5f)
     {
-        GameObject rod = Box("HutCeilingLanternRod",
+        GameObject rod = Box("HutCeilingLantern" + tag + "Rod",
             centre + new Vector3(0f, 0.575f, 0f), new Vector3(0.03f, 0.95f, 0.03f), matLampPole, villageRoot);
         DressLanternPart(rod);
-        GameObject cap = Box("HutCeilingLanternCap",
+        GameObject cap = Box("HutCeilingLantern" + tag + "Cap",
             centre + new Vector3(0f, 0.10f, 0f), new Vector3(0.24f, 0.05f, 0.24f), matWood, villageRoot);
         DressLanternPart(cap);
-        GameObject glass = Sphere("HutCeilingLanternGlass",
+        GameObject glass = Sphere("HutCeilingLantern" + tag + "Glass",
             centre, new Vector3(0.15f, 0.15f, 0.15f), matLampGlass, villageRoot);
         DressLanternPart(glass);
-        GameObject bas = Box("HutCeilingLanternBase",
+        GameObject bas = Box("HutCeilingLantern" + tag + "Base",
             centre + new Vector3(0f, -0.10f, 0f), new Vector3(0.22f, 0.04f, 0.22f), matWood, villageRoot);
         DressLanternPart(bas);
         float p = 0.09f;
-        DressLanternPart(Box("HutCeilingLanternPostA",
+        DressLanternPart(Box("HutCeilingLantern" + tag + "PostA",
             centre + new Vector3(p, 0f, p), new Vector3(0.025f, 0.16f, 0.025f), matWood, villageRoot));
-        DressLanternPart(Box("HutCeilingLanternPostB",
+        DressLanternPart(Box("HutCeilingLantern" + tag + "PostB",
             centre + new Vector3(-p, 0f, p), new Vector3(0.025f, 0.16f, 0.025f), matWood, villageRoot));
-        DressLanternPart(Box("HutCeilingLanternPostC",
+        DressLanternPart(Box("HutCeilingLantern" + tag + "PostC",
             centre + new Vector3(p, 0f, -p), new Vector3(0.025f, 0.16f, 0.025f), matWood, villageRoot));
-        DressLanternPart(Box("HutCeilingLanternPostD",
+        DressLanternPart(Box("HutCeilingLantern" + tag + "PostD",
             centre + new Vector3(-p, 0f, -p), new Vector3(0.025f, 0.16f, 0.025f), matWood, villageRoot));
-        AddPointLight("HutCeilingLanternLight", centre,
-            new Color(1f, 0.6f, 0.25f), 2.0f, 7.5f);
+        AddPointLight(lightName, centre,
+            new Color(1f, 0.6f, 0.25f), intensity, range);
     }
 
     private void BuildHouseInterior(Transform root, Vector3 center, float w, float d)
